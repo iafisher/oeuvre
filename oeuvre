@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+import os
+import re
+import subprocess
+import sys
+from typing import List
+
+
+PATH = os.path.join("/", "home", "iafisher", "Dropbox", "oeuvre.txt")
+
+
+class Work:
+    def __init__(
+        self,
+        title: str,
+        type_: str,
+        creators: List[str],
+        epochs: List[range],
+        locations: List[str],
+        keywords: List[str],
+    ) -> None:
+        self.title = title
+        self.type = type_
+        self.creators = creators
+        self.epochs = epochs
+        self.locations = locations
+        self.keywords = keywords
+
+    def match(self, search_terms: List[str]) -> bool:
+        """
+        Returns if the object matches the search terms.
+        """
+        return all(self.match_one(search_term) for search_term in search_terms)
+
+    def match_one(self, search_term: str) -> bool:
+        """
+        Returns if the object matches the single search term.
+        """
+        search_term = search_term.lower()
+        try:
+            namespace, value = search_term.split(":", maxsplit=1)
+        except ValueError:
+            namespace = ""
+            value = search_term
+
+        if namespace == "epoch":
+            return self.match_epoch(value)
+        elif namespace in ("loc", "location"):
+            return self.match_location(value)
+        else:
+            return any(search_term in keyword for keyword in self.keywords)
+
+    def match_location(self, search_term: str) -> bool:
+        """
+        Returns if the object matches the location search term.
+        """
+        for location in self.locations:
+            if any(l == search_term for l in expand_location(location)):
+                return True
+
+        return False
+
+    def match_epoch(self, search_term: str) -> bool:
+        """
+        Returns if the object matches the epoch search term.
+        """
+        search_term_epoch = parse_epoch(search_term)
+        for epoch in self.epochs:
+            if epoch_overlap(epoch, search_term_epoch):
+                return True
+
+        return False
+
+    def __str__(self) -> str:
+        tags = (
+            [f"epoch:{e.start}-{e.stop-1}" for e in self.epochs]
+            + [f"loc:{l}" for l in self.locations]
+            + self.keywords
+        )
+        tags.sort()
+        tags = "  ".join(tags)
+        creators = ", ".join(self.creators)
+        return f"{self.title} ({creators}):  {tags}"
+
+
+def main() -> None:
+    if len(sys.argv) == 2 and sys.argv[1] in ("-e", "--edit"):
+        editor = os.environ.get("EDITOR", "nano")
+        subprocess.run([editor, PATH])
+        read(PATH)
+    else:
+        works = read(PATH)
+        search_terms = sys.argv[1:]
+        for work in works:
+            if not work.match(search_terms):
+                continue
+
+            print(work)
+
+
+pattern = re.compile(r"^\s*(.+?)\s*\(\s*(.+?)\s*\)\s*:\s*(.+?)\s*$")
+
+
+def read(path: str) -> List[Work]:
+    """
+    Reads a list of Work objects from the given file path.
+    """
+    works = []
+    with open(path, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+
+            m = pattern.match(line)
+            if not m:
+                warning(f"line {i} does not match pattern")
+                continue
+
+            title = m.group(1)
+            creators = split(m.group(2), ",")
+            tags = m.group(3).split()
+
+            epochs = []
+            locations = []
+            keywords = []
+            type_ = None
+            for tag in tags:
+                namespace = tag_namespace(tag)
+                if namespace == "epoch":
+                    epochs.append(parse_epoch(tag_value(tag)))
+                elif namespace == "loc":
+                    locations.append(tag_value(tag).lower())
+                elif namespace == "type":
+                    if type_ is not None:
+                        warning(f"type defined more than once on line {i}")
+                    type_ = tag_value(tag)
+                else:
+                    keywords.append(tag.lower())
+
+            if type_ is None:
+                type_ = "novel"
+
+            works.append(Work(title, type_, creators, epochs, locations, keywords))
+
+    return works
+
+
+def tag_value(tag: str) -> str:
+    """
+    Returns the value of the tag without the namespace.
+    """
+    return tag.split(":", maxsplit=1)[1] if ":" in tag else tag
+
+
+def tag_namespace(tag: str) -> str:
+    """
+    Returns the namespace of the tag, or the empty string if it has no namespace.
+    """
+    return tag.split(":", maxsplit=1)[0] if ":" in tag else ""
+
+
+def parse_epoch(epoch: str) -> range:
+    """
+    Parses the string into an epoch.
+    """
+    if epoch.startswith("~"):
+        year = int(epoch[1:])
+        return range(year - 5, year + 6)
+    elif "-" in epoch:
+        start, end = epoch.split("-")
+        return range(int(start), int(end))
+    else:
+        year = int(epoch)
+        return range(year, year + 1)
+
+
+def epoch_overlap(epoch1: range, epoch2: range) -> bool:
+    """
+    Returns if `epoch1` and `epoch2` overlap in time.
+    """
+    if epoch1.start > epoch2.start:
+        epoch1, epoch2 = epoch2, epoch1
+
+    return epoch2.start <= epoch1.stop
+
+
+LOCATION = {
+    # European countries
+    "france": "europe",
+    "germany": "europe",
+    "ireland": "europe",
+    "italy": "europe",
+    "russia": "europe",
+    "spain": "europe",
+    "uk": "europe",
+    # Asian countries
+    "china": "asia",
+    "india": "asia",
+    "japan": "asia",
+    "korea": "asia",
+    # African countries
+    "congo": "africa",
+    "kenya": "africa",
+    "nigeria": "africa",
+    # Regions and other sub-national units
+    "england": "uk",
+    "midwestern-usa": "usa",
+    "new-england": "usa",
+    "pacific-northwest": "usa",
+    "scotland": "uk",
+    "southern-usa": "usa",
+    "western-usa": "usa",
+    # US states
+    "alabama": "southern-usa",
+    "alaska": "usa",
+    "arizona": "western-usa",
+    "arkansas": "southern-usa",
+    "california": "western-usa",
+    "colorado": "western-usa",
+    "connecticut": "new-england",
+    "delaware": "usa",
+    "florida": "southern-usa",
+    "georgia": "southern-usa",
+    "hawaii": "usa",
+    "idaho": "western-usa",
+    "illinois": "midwestern-usa",
+    "indiana": "midwestern-usa",
+    "iowa": "midwestern-usa",
+    "kansas": "usa",
+    "kentucky": "southern-usa",
+    "louisiana": "southern-usa",
+    "maine": "new-england",
+    "maryland": "usa",
+    "massachusetts": "new-england",
+    "michigan": "midwestern-usa",
+    "minnesota": "midwestern-usa",
+    "mississippi": "southern-usa",
+    "missouri": "midwestern-usa",
+    "montana": "western-usa",
+    "nebraska": "usa",
+    "nevada": "western-usa",
+    "new-hampshire": "new-england",
+    "new-jersey": "usa",
+    "new-mexico": "western-usa",
+    "new-york": "usa",
+    "north-carolina": "southern-usa",
+    "north-dakota": "usa",
+    "ohio": "midwestern-usa",
+    "oklahoma": "western-usa",
+    "oregon": "pacific-northwest",
+    "pennsylvania": "usa",
+    "rhode-island": "new-england",
+    "south-carolina": "southern-usa",
+    "south-dakota": "usa",
+    "tennessee": "southern-usa",
+    "texas": "western-usa",
+    "utah": "western-usa",
+    "vermont": "new-england",
+    "virginia": "southern-usa",
+    "washington": "pacific-northwest",
+    "west-virginia": "southern-usa",
+    "wisconsin": "midwestern-usa",
+    "wyoming": "western-usa",
+    # US cities
+    "boston": "massachusetts",
+    "chicago": "illinois",
+    "dallas": "texas",
+    "houston": "texas",
+    "los-angeles": "california",
+    "miami": "florida",
+    "nyc": "new-york",
+    "philadelphia": "pennsylvania",
+    "san-francisco": "california",
+    "washington-dc": "usa",
+    # World cities
+    "london": "uk",
+    "moscow": "russia",
+    "paris": "france",
+    "rome": "italy",
+}
+
+
+def expand_location(location: str) -> List[str]:
+    """
+    Returns a list of all locations that contain the given location, including itself.
+
+    >>> expand_location("boston")
+    ["boston", "new-england", "usa"]
+    """
+    if location in LOCATION:
+        return [location] + expand_location(LOCATION[location])
+    else:
+        return [location]
+
+
+def split(s: str, by: str = ",") -> List[str]:
+    """
+    Splits the string and removes leading and trailing whitespace from each part.
+    """
+    return [w.strip() for w in s.split(by)]
+
+
+def warning(message: str) -> None:
+    """
+    Prints a warning message to standard error.
+    """
+    print(f"Warning: {message}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
