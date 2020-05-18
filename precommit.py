@@ -14,7 +14,5 @@ def init(precommit):
 
     # Language-specific checks
     precommit.check(checks.PythonFormat())
-    precommit.check(checks.PythonStyle(args=["--extend-ignore=E731"]))
-    precommit.check(
-        checks.Command("PythonTypes", ["mypy"], pass_files=True, pattern=r"^oeuvre.py$")
-    )
+    precommit.check(checks.PythonLint(args=["--extend-ignore=E731"]))
+    precommit.check(checks.PythonTypes(exclude="^precommit.py$"))
