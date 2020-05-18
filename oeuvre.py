@@ -7,8 +7,6 @@ script helps me manage this database by
 
 - assisting with data entry and automatically formatting the entries nicely.
 
-It is currently (as of May 2020) a work in progress.
-
 
 Author:  Ian Fisher (iafisher@protonmail.com)
 Version: May 2020
