@@ -1,386 +1,413 @@
 #!/usr/bin/env python3
 """
-A small script to search my database of books, movies and stories.
+I keep a database of notes on books that I've read and films that I've watched. This
+script helps me manage this database by
 
-Besides full-text search, this script can
+- allowing me to search the database intelligently.
 
-- List each keyword and the number of times it appears in the database.
+- assisting with data entry and automatically formatting the entries nicely.
 
-- Search by location (e.g., searching "loc:southern-usa" will bring up works tagged with
-  "loc:alabama").
+It is currently (as of May 2020) a work in progress.
 
-- Search by time period
-
-The database itself is a plain-text, line-oriented file of the format:
-
-  TITLE (CREATOR1, CREATOR2, ...): TAG1 TAG2 ...
 
 Author:  Ian Fisher (iafisher@protonmail.com)
 Version: May 2020
 """
-import collections
+import argparse
+import glob
 import os
-import re
+import readline
 import subprocess
 import sys
 import textwrap
-from typing import List
+from collections import OrderedDict
+from typing import Dict, IO, Iterator, List, Tuple, Union
 
 
-PATH = os.path.join("/", "home", "iafisher", "Dropbox", "oeuvre.txt")
+OEUVRE_DIRECTORY = "/home/iafisher/Dropbox/oeuvre"
 
 
-class Work:
+# Type definitions
+Field = Union[List[str], str]
+FieldDef = Dict[str, bool]
+Entry = Dict[str, Field]
+
+
+def main(args: List[str]) -> None:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+
+    parser_edit = subparsers.add_parser("edit")
+    parser_edit.add_argument("path")
+    parser_edit.set_defaults(func=main_edit)
+
+    parser_new = subparsers.add_parser("new")
+    parser_new.set_defaults(func=main_new)
+
+    parser_search = subparsers.add_parser("search")
+    parser_search.add_argument("terms", nargs="*")
+    parser_search.add_argument("--partial", action="store_true")
+    parser_search.add_argument("--verbose", action="store_true")
+    parser_search.set_defaults(func=main_search)
+
+    parsed_args = parser.parse_args(args)
+    if hasattr(parsed_args, "func"):
+        parsed_args.func(parsed_args)
+    else:
+        error("no subcommand")
+
+
+def main_edit(args: argparse.Namespace) -> None:
     """
-    Represents a book, movie, story, play etc.
+    Opens the entry for editing and then formats it before saving.
     """
+    fullpath = os.path.join(OEUVRE_DIRECTORY, args.path)
+    if not os.path.exists(fullpath):
+        error(f"{args.path} does not exist")
 
-    def __init__(
-        self,
-        title: str,
-        type_: str,
-        creators: List[str],
-        epochs: List[range],
-        locations: List[str],
-        keywords: List[str],
-    ) -> None:
-        self.title = title
-        self.type = type_
-        self.creators = creators
-        self.epochs = epochs
-        self.locations = locations
-        self.keywords = keywords
-
-    def match(self, search_terms: List[str]) -> bool:
-        """
-        Returns if the object matches the search terms.
-        """
-        return all(self.match_one(search_term) for search_term in search_terms)
-
-    def match_one(self, search_term: str) -> bool:
-        """
-        Returns if the object matches the single search term.
-        """
-        search_term = search_term.lower()
-        try:
-            namespace, value = search_term.split(":", maxsplit=1)
-        except ValueError:
-            namespace = ""
-            value = search_term
-
-        if namespace == "epoch":
-            return self.match_epoch(value)
-        elif namespace in ("loc", "location"):
-            return self.match_location(value)
-        else:
-            return any(search_term in keyword for keyword in self.keywords)
-
-    def match_location(self, search_term: str) -> bool:
-        """
-        Returns if the object matches the location search term.
-        """
-        for location in self.locations:
-            if any(l == search_term for l in expand_location(location)):
-                return True
-
-        return False
-
-    def match_epoch(self, search_term: str) -> bool:
-        """
-        Returns if the object matches the epoch search term.
-        """
-        search_term_epoch = parse_epoch(search_term)
-        for epoch in self.epochs:
-            if epoch_overlap(epoch, search_term_epoch):
-                return True
-
-        return False
-
-    def __str__(self) -> str:
-        tags = (
-            [f"epoch:{e.start}-{e.stop-1}" for e in self.epochs]
-            + [f"loc:{l}" for l in self.locations]
-            + [f"type:{self.type}"]
-            + self.keywords
-        )
-        tags.sort()
-        tags = " ".join(tags)
-        creators = ", ".join(self.creators)
-        return f"{self.title} ({creators}): {tags}"
-
-
-def main() -> None:
-    if len(sys.argv) == 2 and sys.argv[1] == "--help":
-        print("oeuvre: a command-line interface to my books/movies/stories database.")
-        print()
-        print("  oeuvre --edit     open the database for editing")
-        print("  oeuvre --help     print this help message")
-        print("  oeuvre --list     list all known keywords")
-        print("  oeuvre TERMS...   search the database")
-        print()
-        print("Sample queries")
-        print()
-        print("  oeuvre epoch:~1950")
-        print("  oeuvre loc:southern-usa")
-        print("  oeuvre espionage type:story")
-    elif len(sys.argv) == 2 and sys.argv[1] == "--edit":
+    while True:
         editor = os.environ.get("EDITOR", "nano")
-        subprocess.run([editor, PATH])
-        read(PATH)
-    elif len(sys.argv) == 2 and sys.argv[1] == "--list":
-        works = read(PATH)
-        keywords = collections.Counter()
-        for work in works:
-            keywords.update(work.keywords)
+        subprocess.run([editor, fullpath])
 
-        for keyword, count in sorted(keywords.items(), key=lambda kv: kv[0]):
-            print(f"{keyword} ({count})")
-    else:
-        search_terms = sys.argv[1:]
-        works = [w for w in read(PATH) if w.match(search_terms)]
-
-        if os.isatty(sys.stdout.fileno()):
-            wrapper = textwrap.TextWrapper(
-                width=os.get_terminal_size().columns, subsequent_indent="  "
-            )
-            for work in works:
-                print(wrapper.fill(str(work)))
+        try:
+            with open(fullpath, "r", encoding="utf8") as f:
+                entry = parse_entry(f)
+        except OeuvreError as e:
+            print(f"Error: {e}")
+            if not confirm("Try again? "):
+                sys.exit(1)
         else:
-            for work in works:
-                print(work)
+            with open(fullpath, "w", encoding="utf8") as f:
+                f.write(longform(entry))
+                f.write("\n")
+            break
 
 
-pattern = re.compile(r"^\s*(.+?)\s*\(\s*(.+?)\s*\)\s*:\s*(.+?)\s*$")
-
-
-def read(path: str) -> List[Work]:
+def main_new(args: argparse.Namespace) -> None:
     """
-    Reads a list of Work objects from the given file path.
+    Creates a new entry through interactive prompts.
     """
-    works = []
-    with open(path, "r", encoding="utf-8") as f:
-        for i, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
+    while True:
+        entry = OrderedDict()  # type: Entry
+        for fieldname, field in FIELDS.items():
+            value = prompt_field(fieldname, field)
+            if value:
+                entry[fieldname] = value
 
-            m = pattern.match(line)
-            if not m:
-                warning(f"line {i} does not match pattern")
-                continue
+        print()
+        print()
+        print(longform(entry))
+        print()
 
-            title = m.group(1)
-            creators = split(m.group(2), ",")
-            tags = m.group(3).split()
+        if confirm("Looks good? "):
+            break
 
-            epochs = []
-            locations = []
-            keywords = []
-            type_ = None
-            for tag in tags:
-                namespace = tag_namespace(tag)
-                if namespace == "epoch":
-                    epochs.append(parse_epoch(tag_value(tag)))
-                elif namespace == "loc":
-                    locations.append(tag_value(tag).lower())
-                elif namespace == "type":
-                    if type_ is not None:
-                        warning(f"type defined more than once on line {i}")
-                    type_ = tag_value(tag)
-                else:
-                    keywords.append(tag.lower())
+    while True:
+        path = input("Enter the file path to save the entry: ")
+        path = path.strip()
+        fullpath = os.path.join(OEUVRE_DIRECTORY, path)
 
-            if type_ is None:
-                type_ = "novel"
+        if os.path.exists(fullpath):
+            print("A file already exists at that path.")
+        else:
+            break
 
-            works.append(Work(title, type_, creators, epochs, locations, keywords))
-
-    return works
+    with open(fullpath, "w", encoding="utf8") as f:
+        f.write(longform(entry))
+        f.write("\n")
 
 
-def tag_value(tag: str) -> str:
+def main_search(args: argparse.Namespace) -> None:
     """
-    Returns the value of the tag without the namespace.
+    Searches all database entries and prints the matching ones.
     """
-    return tag.split(":", maxsplit=1)[1] if ":" in tag else tag
+    entries = []
+    for path in sorted(glob.glob(OEUVRE_DIRECTORY + "/**/*.txt", recursive=True)):
+        with open(path, "r", encoding="utf8") as f:
+            try:
+                entry = parse_entry(f)
+            except OeuvreError as e:
+                error(str(e))
+
+            entries.append(entry)
+
+    matching = [entry for entry in entries if match(entry, args.terms, partial=args.partial)]
+    for entry in sorted(matching, key=alphabetical_key):
+        if args.verbose:
+            print(longform(entry))
+            print()
+            print()
+        else:
+            print(shortform(entry))
 
 
-def tag_namespace(tag: str) -> str:
+def prompt_field(fieldname: str, field: FieldDef) -> Field:
     """
-    Returns the namespace of the tag, or the empty string if it has no namespace.
+    Prompts for the field based on its definition (required, accepts multiple values).
     """
-    return tag.split(":", maxsplit=1)[0] if ":" in tag else ""
+    values = []
+    while True:
+        try:
+            value = input(fieldname + "? ")
+        except EOFError:
+            print()
+            value = ""
+        except KeyboardInterrupt:
+            print()
+            sys.exit(1)
+
+        value = value.strip()
+        if field.get("multiple"):
+            if value:
+                values.append(value)
+            elif not field.get("required"):
+                if field.get("alphabetical"):
+                    values.sort()
+
+                return values
+        else:
+            if value or not field.get("required"):
+                return value
 
 
-def parse_epoch(epoch: str) -> range:
+def confirm(prompt: str) -> bool:
     """
-    Parses the string into an epoch.
+    Prompts the user for confirmation and returns whether they accepted or not.
     """
-    if epoch.startswith("~"):
-        year = int(epoch[1:])
-        return range(year - 5, year + 6)
-    elif "-" in epoch:
-        start, end = epoch.split("-")
-        return range(int(start), int(end))
+    try:
+        yesno = input(prompt)
+    except EOFError:
+        print()
+        return False
+    except KeyboardInterrupt:
+        print()
+        sys.exit(1)
+
+    yesno = yesno.strip().lower()
+    return yesno.startswith("y")
+
+
+def match(entry: Entry, search_terms: List[str], *, partial: bool = False) -> bool:
+    """
+    Returns True if the entry matches the search terms.
+
+    Search terms are joined by an implicit AND operator.
+
+    If `partial` is True, then the search term can match partially, e.g. `war` can match
+    `civil-war`.
+    """
+    return all(
+        match_one(entry, search_term, partial=partial) for search_term in search_terms
+    )
+
+
+def match_one(entry: Entry, search_term: str, *, partial: bool = False) -> bool:
+    """
+    Returns True if the entry matches the single search term.
+
+    See `match` for meaning of `partial` argument.
+    """
+    field, term = split_term(search_term)
+    if field not in entry:
+        return False
+
+    if partial:
+        pred = lambda v: term.lower() in v.lower()
     else:
-        year = int(epoch)
-        return range(year, year + 1)
+        pred = lambda v: term.lower() == v.lower()
 
-
-def epoch_overlap(epoch1: range, epoch2: range) -> bool:
-    """
-    Returns if `epoch1` and `epoch2` overlap in time.
-    """
-    if epoch1.start > epoch2.start:
-        epoch1, epoch2 = epoch2, epoch1
-
-    return epoch2.start <= epoch1.stop
-
-
-LOCATION = {
-    "central-asia": "asia",
-    "middle-east": "asia",
-    "south-asia": "asia",
-    "southeast-asia": "asia",
-    "south-america": "latin-america",
-    # European countries
-    "france": "europe",
-    "germany": "europe",
-    "greece": "europe",
-    "ireland": "europe",
-    "italy": "europe",
-    "russia": "europe",
-    "spain": "europe",
-    "switzerland": "europe",
-    "uk": "europe",
-    # Asian countries
-    "china": "asia",
-    "india": "asia",
-    "japan": "asia",
-    "kazakhstan": "central-asia",
-    "korea": "asia",
-    "lebanon": "middle-east",
-    # African countries
-    "congo": "africa",
-    "kenya": "africa",
-    "nigeria": "africa",
-    # Latin American countries
-    "argentina": "south-america",
-    "brazil": "south-america",
-    "colombia": "south-america",
-    "cuba": "latin-america",
-    "dominican-republic": "latin-america",
-    "mexico": "latin-america",
-    "peru": "south-america",
-    # Regions and other sub-national units
-    "england": "uk",
-    "midwestern-usa": "usa",
-    "new-england": "usa",
-    "pacific-northwest": "usa",
-    "scotland": "uk",
-    "southern-usa": "usa",
-    "western-usa": "usa",
-    # US states
-    "alabama": "southern-usa",
-    "alaska": "usa",
-    "arizona": "western-usa",
-    "arkansas": "southern-usa",
-    "california": "western-usa",
-    "colorado": "western-usa",
-    "connecticut": "new-england",
-    "delaware": "usa",
-    "florida": "southern-usa",
-    "georgia": "southern-usa",
-    "hawaii": "usa",
-    "idaho": "western-usa",
-    "illinois": "midwestern-usa",
-    "indiana": "midwestern-usa",
-    "iowa": "midwestern-usa",
-    "kansas": "usa",
-    "kentucky": "southern-usa",
-    "louisiana": "southern-usa",
-    "maine": "new-england",
-    "maryland": "usa",
-    "massachusetts": "new-england",
-    "michigan": "midwestern-usa",
-    "minnesota": "midwestern-usa",
-    "mississippi": "southern-usa",
-    "missouri": "midwestern-usa",
-    "montana": "western-usa",
-    "nebraska": "usa",
-    "nevada": "western-usa",
-    "new-hampshire": "new-england",
-    "new-jersey": "usa",
-    "new-mexico": "western-usa",
-    "new-york": "usa",
-    "north-carolina": "southern-usa",
-    "north-dakota": "usa",
-    "ohio": "midwestern-usa",
-    "oklahoma": "western-usa",
-    "oregon": "pacific-northwest",
-    "pennsylvania": "usa",
-    "rhode-island": "new-england",
-    "south-carolina": "southern-usa",
-    "south-dakota": "usa",
-    "tennessee": "southern-usa",
-    "texas": "western-usa",
-    "utah": "western-usa",
-    "vermont": "new-england",
-    "virginia": "southern-usa",
-    "washington": "pacific-northwest",
-    "west-virginia": "southern-usa",
-    "wisconsin": "midwestern-usa",
-    "wyoming": "western-usa",
-    # US cities
-    "baltimore": "maryland",
-    "boston": "massachusetts",
-    "chicago": "illinois",
-    "dallas": "texas",
-    "denver": "colorado",
-    "houston": "texas",
-    "los-angeles": "california",
-    "miami": "florida",
-    "new-orleans": "louisiana",
-    "nyc": "new-york",
-    "philadelphia": "pennsylvania",
-    "san-francisco": "california",
-    "seattle": "washington",
-    "st-louis": "missouri",
-    "washington-dc": "usa",
-    # World cities
-    "london": "uk",
-    "moscow": "russia",
-    "paris": "france",
-    "rome": "italy",
-}
-
-
-def expand_location(location: str) -> List[str]:
-    """
-    Returns a list of all locations that contain the given location, including itself.
-
-    >>> expand_location("boston")
-    ["boston", "new-england", "usa"]
-    """
-    if location in LOCATION:
-        return [location] + expand_location(LOCATION[location])
+    # TODO(2020-05-17): Handle location matching more intelligently.
+    if isinstance(entry[field], list):
+        return any(pred(v) for v in entry[field])
     else:
-        return [location]
+        return pred(entry[field])
 
 
-def split(s: str, by: str = ",") -> List[str]:
+def split_term(term: str) -> Tuple[str, str]:
     """
-    Splits the string and removes leading and trailing whitespace from each part.
+    Splits the term into a field name and a bare term.
+
+    The field name defaults to 'keywords' if it is not supplied.
     """
-    return [w.strip() for w in s.split(by)]
+    if ":" in term:
+        field, term = term.split(":", maxsplit=1)
+        return (field, term)
+    else:
+        return ("keywords", term)
+
+
+def shortform(entry: Entry) -> str:
+    """
+    Returns the short string representation of the entry.
+
+    This is the form that is shown to users for search results.
+    """
+    assert isinstance(entry["title"], str)
+    assert isinstance(entry["filename"], str)
+    if "creator" in entry:
+        assert isinstance(entry["creator"], str)
+        return entry["title"] + " (" + entry["creator"] + ") [" + entry["filename"] + "]"
+    else:
+        return entry["title"] + " [" + entry["filename"] + "]"
+
+
+FIELDS = OrderedDict(
+    [
+        ("title", dict(required=True)),
+        ("creator", dict()),
+        ("type", dict(required=True)),
+        ("year", dict()),
+        ("language", dict()),
+        ("plot-summary", dict()),
+        ("themes", dict()),
+        ("locations", dict(multiple=True, alphabetical=False)),
+        ("keywords", dict(multiple=True, alphabetical=True)),
+    ]
+)
+
+
+MAXIMUM_LENGTH = 80
+INDENT = "  "
+
+
+def longform(entry: Entry) -> str:
+    """
+    Returns the full string representation of the entry.
+
+    This is the form that is written to file.
+    """
+    lines = []
+    for field, fielddef in FIELDS.items():
+        if field not in entry:
+            continue
+
+        value = entry[field]
+        if (
+            isinstance(value, list)
+            or "\n" in value
+            or len(single_line_field(field, value)) > MAXIMUM_LENGTH
+        ):
+            lines.extend(
+                list(
+                    multi_line_field(
+                        field, value, alphabetical=fielddef.get("alphabetical")
+                    )
+                )
+            )
+        else:
+            lines.append(single_line_field(field, value))
+
+    return "\n".join(lines)
+
+
+def single_line_field(field: str, value: str) -> str:
+    """
+    Returns the field and value as a single line.
+    """
+    return field + ": " + value
+
+
+def multi_line_field(
+    field: str, value: Field, *, alphabetical: bool = False
+) -> Iterator[str]:
+    """
+    Returns the field and value as multiple indented lines.
+    """
+    if isinstance(value, list):
+        yield ""
+        yield field + ":"
+        for v in sorted(value) if alphabetical else value:
+            yield INDENT + v
+    else:
+        yield ""
+        yield field + ":"
+
+        paragraphs = value.splitlines()
+        for i, paragraph in enumerate(paragraphs):
+            if i != 0:
+                yield ""
+
+            yield from textwrap.wrap(
+                paragraph,
+                width=MAXIMUM_LENGTH,
+                initial_indent=INDENT,
+                subsequent_indent=INDENT,
+            )
+
+
+def parse_entry(f: IO[str]) -> Entry:
+    """
+    Reads a database entry from a file object.
+
+    Raises an `OeuvreError` if the file is incorrectly formatted.
+    """
+    entry = OrderedDict()  # type: Entry
+    field = None
+    sep = " "
+
+    for lineno, line in enumerate(f, start=1):
+        indented = line.startswith("  ")
+        line = line.strip()
+        if not line:
+            sep = "\n"
+            continue
+
+        if indented:
+            if field is None:
+                raise OeuvreError(f"indented text without a field (line {lineno})")
+
+            previous_value = entry[field]
+            if FIELDS[field].get("multiple"):
+                previous_value.append(line)
+            else:
+                entry[field] = previous_value + sep + line if previous_value else line
+        else:
+            if ":" not in line:
+                raise OeuvreError(f"un-indented line without a colon (line {lineno})")
+
+            field, value = line.split(":", maxsplit=1)
+            field = field.strip()
+            value = value.strip()
+
+            if field not in FIELDS:
+                raise OeuvreError(f"unknown field {field!r} (line {lineno})")
+
+            if FIELDS[field].get("multiple"):
+                entry[field] = [value] if value else []
+            else:
+                entry[field] = value
+
+        sep = " "
+
+    entry["filename"] = f.name.replace(OEUVRE_DIRECTORY + "/", "")
+    return entry
+
+
+def alphabetical_key(entry):
+    """
+    Key for sort functions to sort entries alphabetically.
+    """
+    name = shortform(entry)
+    if name.startswith("The "):
+        return name[4:]
+    elif name.startswith(("Le ", "La ")):
+        return name[3:]
+    else:
+        return name
+
+
+def error(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(1)
 
 
 def warning(message: str) -> None:
-    """
-    Prints a warning message to standard error.
-    """
-    print(f"Warning: {message}", file=sys.stderr)
+    print(f"warning: {message}", file=sys.stderr)
+
+
+class OeuvreError(Exception):
+    pass
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
