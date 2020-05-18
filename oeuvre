@@ -1,8 +1,29 @@
 #!/usr/bin/env python3
+"""
+A small script to search my database of books, movies and stories.
+
+Besides full-text search, this script can
+
+- List each keyword and the number of times it appears in the database.
+
+- Search by location (e.g., searching "loc:southern-usa" will bring up works tagged with
+  "loc:alabama").
+
+- Search by time period
+
+The database itself is a plain-text, line-oriented file of the format:
+
+  TITLE (CREATOR1, CREATOR2, ...): TAG1 TAG2 ...
+
+Author:  Ian Fisher (iafisher@protonmail.com)
+Version: May 2020
+"""
+import collections
 import os
 import re
 import subprocess
 import sys
+import textwrap
 from typing import List
 
 
@@ -10,6 +31,10 @@ PATH = os.path.join("/", "home", "iafisher", "Dropbox", "oeuvre.txt")
 
 
 class Work:
+    """
+    Represents a book, movie, story, play etc.
+    """
+
     def __init__(
         self,
         title: str,
@@ -75,27 +100,54 @@ class Work:
         tags = (
             [f"epoch:{e.start}-{e.stop-1}" for e in self.epochs]
             + [f"loc:{l}" for l in self.locations]
+            + [f"type:{self.type}"]
             + self.keywords
         )
         tags.sort()
-        tags = "  ".join(tags)
+        tags = " ".join(tags)
         creators = ", ".join(self.creators)
-        return f"{self.title} ({creators}):  {tags}"
+        return f"{self.title} ({creators}): {tags}"
 
 
 def main() -> None:
-    if len(sys.argv) == 2 and sys.argv[1] in ("-e", "--edit"):
+    if len(sys.argv) == 2 and sys.argv[1] == "--help":
+        print("oeuvre: a command-line interface to my books/movies/stories database.")
+        print()
+        print("  oeuvre --edit     open the database for editing")
+        print("  oeuvre --help     print this help message")
+        print("  oeuvre --list     list all known keywords")
+        print("  oeuvre TERMS...   search the database")
+        print()
+        print("Sample queries")
+        print()
+        print("  oeuvre epoch:~1950")
+        print("  oeuvre loc:southern-usa")
+        print("  oeuvre espionage type:story")
+    elif len(sys.argv) == 2 and sys.argv[1] == "--edit":
         editor = os.environ.get("EDITOR", "nano")
         subprocess.run([editor, PATH])
         read(PATH)
-    else:
+    elif len(sys.argv) == 2 and sys.argv[1] == "--list":
         works = read(PATH)
-        search_terms = sys.argv[1:]
+        keywords = collections.Counter()
         for work in works:
-            if not work.match(search_terms):
-                continue
+            keywords.update(work.keywords)
 
-            print(work)
+        for keyword, count in sorted(keywords.items(), key=lambda kv: kv[0]):
+            print(f"{keyword} ({count})")
+    else:
+        search_terms = sys.argv[1:]
+        works = [w for w in read(PATH) if w.match(search_terms)]
+
+        if os.isatty(sys.stdout.fileno()):
+            wrapper = textwrap.TextWrapper(
+                width=os.get_terminal_size().columns, subsequent_indent="  "
+            )
+            for work in works:
+                print(wrapper.fill(str(work)))
+        else:
+            for work in works:
+                print(work)
 
 
 pattern = re.compile(r"^\s*(.+?)\s*\(\s*(.+?)\s*\)\s*:\s*(.+?)\s*$")
@@ -186,23 +238,40 @@ def epoch_overlap(epoch1: range, epoch2: range) -> bool:
 
 
 LOCATION = {
+    "central-asia": "asia",
+    "middle-east": "asia",
+    "south-asia": "asia",
+    "southeast-asia": "asia",
+    "south-america": "latin-america",
     # European countries
     "france": "europe",
     "germany": "europe",
+    "greece": "europe",
     "ireland": "europe",
     "italy": "europe",
     "russia": "europe",
     "spain": "europe",
+    "switzerland": "europe",
     "uk": "europe",
     # Asian countries
     "china": "asia",
     "india": "asia",
     "japan": "asia",
+    "kazakhstan": "central-asia",
     "korea": "asia",
+    "lebanon": "middle-east",
     # African countries
     "congo": "africa",
     "kenya": "africa",
     "nigeria": "africa",
+    # Latin American countries
+    "argentina": "south-america",
+    "brazil": "south-america",
+    "colombia": "south-america",
+    "cuba": "latin-america",
+    "dominican-republic": "latin-america",
+    "mexico": "latin-america",
+    "peru": "south-america",
     # Regions and other sub-national units
     "england": "uk",
     "midwestern-usa": "usa",
@@ -263,15 +332,20 @@ LOCATION = {
     "wisconsin": "midwestern-usa",
     "wyoming": "western-usa",
     # US cities
+    "baltimore": "maryland",
     "boston": "massachusetts",
     "chicago": "illinois",
     "dallas": "texas",
+    "denver": "colorado",
     "houston": "texas",
     "los-angeles": "california",
     "miami": "florida",
+    "new-orleans": "louisiana",
     "nyc": "new-york",
     "philadelphia": "pennsylvania",
     "san-francisco": "california",
+    "seattle": "washington",
+    "st-louis": "missouri",
     "washington-dc": "usa",
     # World cities
     "london": "uk",
