@@ -261,6 +261,7 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ("year", dict()),
         ("language", dict()),
         ("plot-summary", dict()),
+        ("characters", dict(multiple=True, alphabetical=False)),
         ("themes", dict()),
         ("locations", dict(multiple=True, alphabetical=False)),
         ("keywords", dict(multiple=True, alphabetical=True)),
