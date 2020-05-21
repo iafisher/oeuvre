@@ -18,7 +18,7 @@ import readline  # noqa: F401
 import subprocess
 import sys
 import textwrap
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 from typing import Dict, IO, Iterator, List, Tuple, Union
 
 
@@ -38,6 +38,10 @@ def main(args: List[str]) -> None:
     parser_edit = subparsers.add_parser("edit")
     parser_edit.add_argument("path")
     parser_edit.set_defaults(func=main_edit)
+
+    parser_list = subparsers.add_parser("list")
+    parser_list.add_argument("--sorted", action="store_true")
+    parser_list.set_defaults(func=main_list)
 
     parser_new = subparsers.add_parser("new")
     parser_new.set_defaults(func=main_new)
@@ -78,7 +82,26 @@ def main_edit(args: argparse.Namespace) -> None:
             with open(fullpath, "w", encoding="utf8") as f:
                 f.write(longform(entry))
                 f.write("\n")
+            print(longform(entry))
             break
+
+
+def main_list(args: argparse.Namespace) -> None:
+    """
+    Lists all keywords from the database.
+    """
+    counter: defaultdict = defaultdict(int)
+    entries = read_entries()
+    for entry in entries:
+        if "keywords" in entry:
+            for keyword in entry["keywords"]:
+                counter[keyword] += 1
+
+    # Sort by count and then by name if --sorted flag was present. Otherwise, just by
+    # name.
+    key = lambda kv: (-kv[1], kv[0]) if args.sorted else kv[0]
+    for keyword, count in sorted(counter.items(), key=key):
+        print(f"{keyword} ({count})")
 
 
 def main_new(args: argparse.Namespace) -> None:
@@ -119,16 +142,7 @@ def main_search(args: argparse.Namespace) -> None:
     """
     Searches all database entries and prints the matching ones.
     """
-    entries = []
-    for path in sorted(glob.glob(OEUVRE_DIRECTORY + "/**/*.txt", recursive=True)):
-        with open(path, "r", encoding="utf8") as f:
-            try:
-                entry = parse_entry(f)
-            except OeuvreError as e:
-                error(str(e))
-
-            entries.append(entry)
-
+    entries = read_entries()
     matching = [
         entry for entry in entries if match(entry, args.terms, partial=args.partial)
     ]
@@ -139,6 +153,22 @@ def main_search(args: argparse.Namespace) -> None:
             print()
         else:
             print(shortform(entry))
+
+
+def read_entries() -> List[Entry]:
+    """
+    Returns a list of all entries in the database.
+    """
+    entries = []
+    for path in sorted(glob.glob(OEUVRE_DIRECTORY + "/**/*.txt", recursive=True)):
+        with open(path, "r", encoding="utf8") as f:
+            try:
+                entry = parse_entry(f)
+            except OeuvreError as e:
+                error(str(e))
+
+            entries.append(entry)
+    return entries
 
 
 def prompt_field(fieldname: str, field: FieldDef) -> Field:
@@ -265,6 +295,7 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ("themes", dict()),
         ("locations", dict(multiple=True, alphabetical=False)),
         ("keywords", dict(multiple=True, alphabetical=True)),
+        ("quotes", dict()),
         ("notes", dict()),
     ]
 )
