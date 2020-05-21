@@ -27,7 +27,6 @@ OEUVRE_DIRECTORY = "/home/iafisher/Dropbox/oeuvre"
 
 # Type definitions
 Field = Union[List[str], str]
-FieldDef = Dict[str, bool]
 Entry = Dict[str, Field]
 
 
@@ -48,7 +47,6 @@ def main(args: List[str]) -> None:
 
     parser_search = subparsers.add_parser("search")
     parser_search.add_argument("terms", nargs="*")
-    parser_search.add_argument("--partial", action="store_true")
     parser_search.add_argument("--verbose", action="store_true")
     parser_search.set_defaults(func=main_search)
 
@@ -143,9 +141,7 @@ def main_search(args: argparse.Namespace) -> None:
     Searches all database entries and prints the matching ones.
     """
     entries = read_entries()
-    matching = [
-        entry for entry in entries if match(entry, args.terms, partial=args.partial)
-    ]
+    matching = [entry for entry in entries if match(entry, args.terms, partial=True)]
     for entry in sorted(matching, key=alphabetical_key):
         if args.verbose:
             print(longform(entry))
@@ -171,7 +167,7 @@ def read_entries() -> List[Entry]:
     return entries
 
 
-def prompt_field(fieldname: str, field: FieldDef) -> Field:
+def prompt_field(fieldname: str, field: "FieldDef") -> Field:
     """
     Prompts for the field based on its definition (required, accepts multiple values).
     """
@@ -187,16 +183,16 @@ def prompt_field(fieldname: str, field: FieldDef) -> Field:
             sys.exit(1)
 
         value = value.strip()
-        if field.get("multiple"):
+        if field.multiple:
             if value:
                 values.append(value)
-            elif not field.get("required"):
-                if field.get("alphabetical"):
+            elif not field.required:
+                if field.alphabetical:
                     values.sort()
 
                 return values
         else:
-            if value or not field.get("required"):
+            if value or not field.required:
                 return value
 
 
@@ -217,7 +213,7 @@ def confirm(prompt: str) -> bool:
     return yesno.startswith("y")
 
 
-def match(entry: Entry, search_terms: List[str], *, partial: bool = False) -> bool:
+def match(entry: Entry, search_terms: List[str], *, partial: bool) -> bool:
     """
     Returns True if the entry matches the search terms.
 
@@ -231,15 +227,13 @@ def match(entry: Entry, search_terms: List[str], *, partial: bool = False) -> bo
     )
 
 
-def match_one(entry: Entry, search_term: str, *, partial: bool = False) -> bool:
+def match_one(entry: Entry, search_term: str, *, partial: bool) -> bool:
     """
     Returns True if the entry matches the single search term.
 
     See `match` for meaning of `partial` argument.
     """
-    field, term = split_term(search_term)
-    if field not in entry:
-        return False
+    search_field, term = split_term(search_term)
 
     if partial:
         pred = lambda v: term.lower() in v.lower()
@@ -247,23 +241,35 @@ def match_one(entry: Entry, search_term: str, *, partial: bool = False) -> bool:
         pred = lambda v: term.lower() == v.lower()
 
     # TODO(2020-05-17): Handle location matching more intelligently.
-    if isinstance(entry[field], list):
-        return any(pred(v) for v in entry[field])
+    if search_field:
+        fields_to_match = [search_field]
     else:
-        return pred(entry[field])
+        fields_to_match = [
+            field for field, fielddef in FIELDS.items() if fielddef.searchable
+        ]
+
+    matches = False
+    for field in fields_to_match:
+        if field not in entry:
+            continue
+
+        if isinstance(entry[field], list):
+            matches = matches or any(pred(v) for v in entry[field])
+        else:
+            matches = matches or pred(entry[field])
+
+    return matches
 
 
 def split_term(term: str) -> Tuple[str, str]:
     """
-    Splits the term into a field name and a bare term.
-
-    The field name defaults to 'keywords' if it is not supplied.
+    Splits the term into a field name (which may be empty) and a bare term.
     """
     if ":" in term:
         field, term = term.split(":", maxsplit=1)
         return (field, term)
     else:
-        return ("keywords", term)
+        return ("", term)
 
 
 def shortform(entry: Entry) -> str:
@@ -283,20 +289,30 @@ def shortform(entry: Entry) -> str:
         return entry["title"] + " [" + entry["filename"] + "]"
 
 
+class FieldDef:
+    def __init__(
+        self, required=False, multiple=False, alphabetical=False, searchable=False
+    ):
+        self.required = required
+        self.multiple = multiple
+        self.alphabetical = alphabetical
+        self.searchable = searchable
+
+
 FIELDS: Dict[str, FieldDef] = OrderedDict(
     [
-        ("title", dict(required=True)),
-        ("creator", dict()),
-        ("type", dict(required=True)),
-        ("year", dict()),
-        ("language", dict()),
-        ("plot-summary", dict()),
-        ("characters", dict(multiple=True, alphabetical=False)),
-        ("themes", dict()),
-        ("locations", dict(multiple=True, alphabetical=False)),
-        ("keywords", dict(multiple=True, alphabetical=True)),
-        ("quotes", dict()),
-        ("notes", dict()),
+        ("title", FieldDef(required=True, searchable=True)),
+        ("creator", FieldDef(searchable=True)),
+        ("type", FieldDef(required=True)),
+        ("year", FieldDef()),
+        ("language", FieldDef()),
+        ("plot-summary", FieldDef()),
+        ("characters", FieldDef(multiple=True, alphabetical=False, searchable=True)),
+        ("themes", FieldDef(searchable=True)),
+        ("locations", FieldDef(multiple=True, alphabetical=False, searchable=True)),
+        ("keywords", FieldDef(multiple=True, alphabetical=True, searchable=True)),
+        ("quotes", FieldDef()),
+        ("notes", FieldDef()),
     ]
 )
 
@@ -323,11 +339,7 @@ def longform(entry: Entry) -> str:
             or len(single_line_field(field, value)) > MAXIMUM_LENGTH
         ):
             lines.extend(
-                list(
-                    multi_line_field(
-                        field, value, alphabetical=fielddef.get("alphabetical", False)
-                    )
-                )
+                list(multi_line_field(field, value, alphabetical=fielddef.alphabetical))
             )
         else:
             lines.append(single_line_field(field, value))
@@ -392,7 +404,7 @@ def parse_entry(f: IO[str]) -> Entry:
                 raise OeuvreError(f"indented text without a field (line {lineno})")
 
             previous_value = entry[field]
-            if FIELDS[field].get("multiple"):
+            if FIELDS[field].multiple:
                 previous_value.append(line)
             else:
                 entry[field] = previous_value + sep + line if previous_value else line
@@ -407,7 +419,7 @@ def parse_entry(f: IO[str]) -> Entry:
             if field not in FIELDS:
                 raise OeuvreError(f"unknown field {field!r} (line {lineno})")
 
-            if FIELDS[field].get("multiple"):
+            if FIELDS[field].multiple:
                 entry[field] = [value] if value else []
             else:
                 entry[field] = value
