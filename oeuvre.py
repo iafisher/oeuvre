@@ -39,9 +39,9 @@ def main(args: List[str]) -> None:
     parser_edit.add_argument("path")
     parser_edit.set_defaults(func=main_edit)
 
-    parser_list = subparsers.add_parser("list")
+    parser_list = subparsers.add_parser("keywords")
     parser_list.add_argument("--sorted", action="store_true")
-    parser_list.set_defaults(func=main_list)
+    parser_list.set_defaults(func=main_keywords)
 
     parser_new = subparsers.add_parser("new")
     parser_new.set_defaults(func=main_new)
@@ -88,7 +88,7 @@ def main_edit(args: argparse.Namespace) -> None:
             break
 
 
-def main_list(args: argparse.Namespace) -> None:
+def main_keywords(args: argparse.Namespace) -> None:
     """
     Lists all keywords from the database.
     """
