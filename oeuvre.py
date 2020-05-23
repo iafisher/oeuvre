@@ -12,6 +12,7 @@ Author:  Ian Fisher (iafisher@protonmail.com)
 Version: May 2020
 """
 import argparse
+import datetime
 import glob
 import os
 import readline  # noqa: F401
@@ -68,6 +69,7 @@ def main_edit(args: argparse.Namespace) -> None:
     while True:
         editor = os.environ.get("EDITOR", "nano")
         subprocess.run([editor, fullpath])
+        timestamp = make_timestamp()
 
         try:
             with open(fullpath, "r", encoding="utf8") as f:
@@ -77,9 +79,11 @@ def main_edit(args: argparse.Namespace) -> None:
             if not confirm("Try again? "):
                 sys.exit(1)
         else:
+            entry["last-updated"] = timestamp
             with open(fullpath, "w", encoding="utf8") as f:
                 f.write(longform(entry))
                 f.write("\n")
+
             print(longform(entry))
             break
 
@@ -109,9 +113,16 @@ def main_new(args: argparse.Namespace) -> None:
     while True:
         entry = OrderedDict()  # type: Entry
         for fieldname, field in FIELDS.items():
+            if not field.editable:
+                continue
+
             value = prompt_field(fieldname, field)
             if value:
                 entry[fieldname] = value
+
+        timestamp = make_timestamp()
+        entry["last-updated"] = timestamp
+        entry["created-at"] = timestamp
 
         print()
         print()
@@ -291,12 +302,18 @@ def shortform(entry: Entry) -> str:
 
 class FieldDef:
     def __init__(
-        self, required=False, multiple=False, alphabetical=False, searchable=False
+        self,
+        required=False,
+        multiple=False,
+        alphabetical=False,
+        searchable=False,
+        editable=True,
     ):
         self.required = required
         self.multiple = multiple
         self.alphabetical = alphabetical
         self.searchable = searchable
+        self.editable = editable
 
 
 FIELDS: Dict[str, FieldDef] = OrderedDict(
@@ -313,6 +330,8 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ("keywords", FieldDef(multiple=True, alphabetical=True, searchable=True)),
         ("quotes", FieldDef()),
         ("notes", FieldDef()),
+        ("last-updated", FieldDef(editable=False)),
+        ("created-at", FieldDef(editable=False)),
     ]
 )
 
@@ -441,6 +460,13 @@ def alphabetical_key(entry):
         return name[3:]
     else:
         return name
+
+
+def make_timestamp() -> str:
+    """
+    Returns a timestamp for the current time.
+    """
+    return datetime.datetime.utcnow().isoformat(timespec="seconds")
 
 
 def error(message: str) -> None:
