@@ -27,7 +27,7 @@ OEUVRE_DIRECTORY = "/home/iafisher/Dropbox/oeuvre"
 
 
 # Type definitions
-Field = Union[List[str], str]
+Field = Union[List[str], List["KeywordField"], str]
 Entry = Dict[str, Field]
 
 
@@ -97,7 +97,8 @@ def main_keywords(args: argparse.Namespace) -> None:
     for entry in entries:
         if "keywords" in entry:
             for keyword in entry["keywords"]:
-                counter[keyword] += 1
+                assert isinstance(keyword, KeywordField)
+                counter[keyword.keyword] += 1
 
     # Sort by count and then by name if --sorted flag was present. Otherwise, just by
     # name.
@@ -264,10 +265,14 @@ def match_one(entry: Entry, search_term: str, *, partial: bool) -> bool:
         if field not in entry:
             continue
 
-        if isinstance(entry[field], list):
-            matches = matches or any(pred(v) for v in entry[field])
+        field_value = entry[field]
+        if isinstance(field_value, list):
+            matches = matches or any(
+                pred(v.keyword if isinstance(v, KeywordField) else v)
+                for v in field_value
+            )
         else:
-            matches = matches or pred(entry[field])
+            matches = matches or pred(field_value)
 
     return matches
 
@@ -308,12 +313,50 @@ class FieldDef:
         alphabetical=False,
         searchable=False,
         editable=True,
+        keyword_style=False,
     ):
+        if required and not editable:
+            raise OeuvreError("required field must be editable")
+
+        if keyword_style and not multiple:
+            raise OeuvreError("multiple must be True if keyword_style is True")
+
         self.required = required
         self.multiple = multiple
         self.alphabetical = alphabetical
         self.searchable = searchable
         self.editable = editable
+        self.keyword_style = keyword_style
+
+
+class KeywordField:
+    def __init__(self, keyword, description):
+        self.keyword = keyword
+        self.description = description
+
+    @classmethod
+    def from_string(cls, s):
+        if ":" in s:
+            keyword, description = s.split(":", maxsplit=1)
+            keyword = keyword.rstrip()
+            description = description.lstrip()
+        else:
+            keyword = s
+            description = ""
+
+        return cls(keyword, description)
+
+    def __bool__(self):
+        return bool(self.keyword or self.description)
+
+    def __repr__(self):
+        return f"KeywordField({self.keyword!r}, {self.description!r})"
+
+    def __str__(self):
+        if self.description:
+            return f"{self.keyword}: {self.description}"
+        else:
+            return self.keyword
 
 
 FIELDS: Dict[str, FieldDef] = OrderedDict(
@@ -324,10 +367,20 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ("year", FieldDef()),
         ("language", FieldDef()),
         ("plot-summary", FieldDef()),
-        ("characters", FieldDef(multiple=True, alphabetical=False, searchable=True)),
+        (
+            "characters",
+            FieldDef(
+                multiple=True, alphabetical=False, searchable=True, keyword_style=True
+            ),
+        ),
         ("themes", FieldDef(searchable=True)),
         ("locations", FieldDef(multiple=True, alphabetical=False, searchable=True)),
-        ("keywords", FieldDef(multiple=True, alphabetical=True, searchable=True)),
+        (
+            "keywords",
+            FieldDef(
+                multiple=True, alphabetical=True, searchable=True, keyword_style=True
+            ),
+        ),
         ("quotes", FieldDef()),
         ("notes", FieldDef()),
         ("last-updated", FieldDef(editable=False)),
@@ -353,7 +406,7 @@ def longform(entry: Entry) -> str:
 
         value = entry[field]
         if (
-            isinstance(value, list)
+            fielddef.multiple
             or "\n" in value
             or len(single_line_field(field, value)) > MAXIMUM_LENGTH
         ):
@@ -366,11 +419,11 @@ def longform(entry: Entry) -> str:
     return "\n".join(lines)
 
 
-def single_line_field(field: str, value: str) -> str:
+def single_line_field(field: str, value: Field) -> str:
     """
     Returns the field and value as a single line.
     """
-    return field + ": " + value
+    return field + ": " + str(value)
 
 
 def multi_line_field(
@@ -382,8 +435,14 @@ def multi_line_field(
     if isinstance(value, list):
         yield ""
         yield field + ":"
-        for v in sorted(value) if alphabetical else value:
-            yield INDENT + v
+        values = [str(v) for v in value]
+        for v in sorted(values) if alphabetical else values:
+            yield from textwrap.wrap(
+                str(v),
+                width=MAXIMUM_LENGTH,
+                initial_indent=INDENT,
+                subsequent_indent=(INDENT * 2),
+            )
     else:
         yield ""
         yield field + ":"
@@ -424,6 +483,9 @@ def parse_entry(f: IO[str]) -> Entry:
 
             previous_value = entry[field]
             if FIELDS[field].multiple:
+                if FIELDS[field].keyword_style:
+                    line = KeywordField.from_string(line)
+
                 previous_value.append(line)
             else:
                 entry[field] = previous_value + sep + line if previous_value else line
@@ -439,6 +501,9 @@ def parse_entry(f: IO[str]) -> Entry:
                 raise OeuvreError(f"unknown field {field!r} (line {lineno})")
 
             if FIELDS[field].multiple:
+                if FIELDS[field].keyword_style:
+                    value = KeywordField.from_string(value)
+
                 entry[field] = [value] if value else []
             else:
                 entry[field] = value
