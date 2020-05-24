@@ -535,8 +535,15 @@ def alphabetical_key(entry):
 def make_timestamp() -> str:
     """
     Returns a timestamp for the current time.
+
+    The exact format of the timestamp is an implementation detail, but it is guaranteed
+    to be human-readable.
     """
-    return datetime.datetime.utcnow().isoformat(timespec="seconds")
+    # Courtesy of https://stackoverflow.com/questions/25837452/
+    utc = datetime.datetime.now(datetime.timezone.utc)
+    local = utc.astimezone()
+    # e.g., 'Sun 24 May 2020 08:55 AM PDT'
+    return local.strftime("%a %d %b %Y %I:%M %p %Z")
 
 
 def error(message: str) -> None:
