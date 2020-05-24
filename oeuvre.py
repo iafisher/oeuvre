@@ -62,7 +62,8 @@ def main_edit(args: argparse.Namespace) -> None:
     """
     Opens the entry for editing and then formats it before saving.
     """
-    fullpath = os.path.join(OEUVRE_DIRECTORY, args.path)
+    path = args.path if args.path.endswith(".txt") else args.path + ".txt"
+    fullpath = os.path.join(OEUVRE_DIRECTORY, path)
     if not os.path.exists(fullpath):
         error(f"{args.path} does not exist")
 
