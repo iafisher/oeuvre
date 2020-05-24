@@ -80,11 +80,14 @@ def main_edit(args: argparse.Namespace) -> None:
                 sys.exit(1)
         else:
             entry["last-updated"] = timestamp
+            # Call `longform` before opening the file for writing, so that if there's an
+            # error the file is not wiped out.
+            text = longform(entry)
             with open(fullpath, "w", encoding="utf8") as f:
-                f.write(longform(entry))
+                f.write(text)
                 f.write("\n")
 
-            print(longform(entry))
+            print(text)
             break
 
 
