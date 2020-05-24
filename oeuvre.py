@@ -416,8 +416,12 @@ def longform(entry: Entry) -> str:
             lines.extend(
                 list(multi_line_field(field, value, alphabetical=fielddef.alphabetical))
             )
+            lines.append("")
         else:
             lines.append(single_line_field(field, value))
+
+    if lines and not lines[-1]:
+        lines.pop()
 
     return "\n".join(lines)
 
@@ -436,7 +440,6 @@ def multi_line_field(
     Returns the field and value as multiple indented lines.
     """
     if isinstance(value, list):
-        yield ""
         yield field + ":"
         values = [str(v) for v in value]
         for v in sorted(values) if alphabetical else values:
@@ -447,7 +450,6 @@ def multi_line_field(
                 subsequent_indent=(INDENT * 2),
             )
     else:
-        yield ""
         yield field + ":"
 
         paragraphs = value.splitlines()
