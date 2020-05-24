@@ -48,8 +48,11 @@ def main(args: List[str]) -> None:
 
     parser_search = subparsers.add_parser("search")
     parser_search.add_argument("terms", nargs="*")
-    parser_search.add_argument("--verbose", action="store_true")
     parser_search.set_defaults(func=main_search)
+
+    parser_show = subparsers.add_parser("show")
+    parser_show.add_argument("terms", nargs="*")
+    parser_show.set_defaults(func=main_show)
 
     parsed_args = parser.parse_args(args)
     if hasattr(parsed_args, "func"):
@@ -159,12 +162,23 @@ def main_search(args: argparse.Namespace) -> None:
     entries = read_entries()
     matching = [entry for entry in entries if match(entry, args.terms, partial=True)]
     for entry in sorted(matching, key=alphabetical_key):
-        if args.verbose:
-            print(longform(entry))
-            print()
-            print()
-        else:
-            print(shortform(entry))
+        print(shortform(entry))
+
+
+def main_show(args: argparse.Namespace) -> None:
+    """
+    Prints the full entry that matches the search terms.
+    """
+    entries = read_entries()
+    matching = [entry for entry in entries if match(entry, args.terms, partial=True)]
+    if len(matching) == 0:
+        print("No matching entries.")
+    elif len(matching) > 1:
+        print("Multiple matching entries:")
+        for entry in sorted(matching, key=alphabetical_key):
+            print("  " + shortform(entry))
+    else:
+        print(longform(matching[0]))
 
 
 def read_entries() -> List[Entry]:
