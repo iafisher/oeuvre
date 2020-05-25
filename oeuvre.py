@@ -36,7 +36,7 @@ def main(args: List[str]) -> None:
     subparsers = parser.add_subparsers()
 
     parser_edit = subparsers.add_parser("edit")
-    parser_edit.add_argument("path")
+    parser_edit.add_argument("terms", nargs="*")
     parser_edit.set_defaults(func=main_edit)
 
     parser_list = subparsers.add_parser("keywords")
@@ -65,33 +65,42 @@ def main_edit(args: argparse.Namespace) -> None:
     """
     Opens the entry for editing and then formats it before saving.
     """
-    path = args.path if args.path.endswith(".txt") else args.path + ".txt"
-    fullpath = os.path.join(OEUVRE_DIRECTORY, path)
-    if not os.path.exists(fullpath):
-        error(f"{args.path} does not exist")
-
+    matching = read_matching_entries(args.terms)
+    fullpaths = [
+        os.path.join(OEUVRE_DIRECTORY, e["filename"]) for e in matching  # type: ignore
+    ]
     while True:
         editor = os.environ.get("EDITOR", "nano")
-        subprocess.run([editor, fullpath])
+        r = subprocess.run([editor] + fullpaths)
+        if r.returncode != 0:
+            error(f"editor process exited with error code {r.returncode}")
+
         timestamp = make_timestamp()
+        success = True
+        for fullpath in fullpaths:
+            try:
+                with open(fullpath, "r", encoding="utf8") as f:
+                    entry = parse_entry(f)
+            except OeuvreError as e:
+                success = False
+                shortpath = fullpath.replace(OEUVRE_DIRECTORY, "").lstrip("/")
+                print(f"Error on {shortpath}: {e}")
+                if not confirm("Try again? "):
+                    sys.exit(1)
+            else:
+                entry["last-updated"] = timestamp
+                # Call `longform` before opening the file for writing, so that if
+                # there's an error the file is not wiped out.
+                text = longform(entry)
+                with open(fullpath, "w", encoding="utf8") as f:
+                    f.write(text)
+                    f.write("\n")
 
-        try:
-            with open(fullpath, "r", encoding="utf8") as f:
-                entry = parse_entry(f)
-        except OeuvreError as e:
-            print(f"Error: {e}")
-            if not confirm("Try again? "):
-                sys.exit(1)
-        else:
-            entry["last-updated"] = timestamp
-            # Call `longform` before opening the file for writing, so that if there's an
-            # error the file is not wiped out.
-            text = longform(entry)
-            with open(fullpath, "w", encoding="utf8") as f:
-                f.write(text)
-                f.write("\n")
+                # Only print the entry if only one was opened for editing.
+                if len(fullpaths) == 1:
+                    print(text)
 
-            print(text)
+        if success:
             break
 
 
