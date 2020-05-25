@@ -159,8 +159,7 @@ def main_search(args: argparse.Namespace) -> None:
     """
     Searches all database entries and prints the matching ones.
     """
-    entries = read_entries()
-    matching = [entry for entry in entries if match(entry, args.terms, partial=True)]
+    matching = read_matching_entries(args.terms)
     for entry in sorted(matching, key=alphabetical_key):
         print(shortform(entry))
 
@@ -169,8 +168,7 @@ def main_show(args: argparse.Namespace) -> None:
     """
     Prints the full entry that matches the search terms.
     """
-    entries = read_entries()
-    matching = [entry for entry in entries if match(entry, args.terms, partial=True)]
+    matching = read_matching_entries(args.terms)
     if len(matching) == 0:
         print("No matching entries.")
     elif len(matching) > 1:
@@ -179,6 +177,14 @@ def main_show(args: argparse.Namespace) -> None:
             print("  " + shortform(entry))
     else:
         print(longform(matching[0]))
+
+
+def read_matching_entries(search_terms: List[str]) -> List[Entry]:
+    """
+    Returns a list of all entries in the database that match the search terms.
+    """
+    entries = read_entries()
+    return [entry for entry in entries if match(entry, search_terms, partial=True)]
 
 
 def read_entries() -> List[Entry]:
@@ -276,7 +282,7 @@ def match_one(entry: Entry, search_term: str, *, partial: bool) -> bool:
     else:
         fields_to_match = [
             field for field, fielddef in FIELDS.items() if fielddef.searchable
-        ]
+        ] + ["filename"]
 
     matches = False
     for field in fields_to_match:
