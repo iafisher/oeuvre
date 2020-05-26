@@ -20,7 +20,7 @@ import subprocess
 import sys
 import textwrap
 from collections import defaultdict, OrderedDict
-from typing import Dict, IO, Iterator, List, Tuple, Union
+from typing import Dict, IO, Iterator, List, Optional, Tuple, Union
 
 
 OEUVRE_DIRECTORY = "/home/iafisher/Dropbox/oeuvre"
@@ -83,8 +83,7 @@ def main_edit(args: argparse.Namespace) -> None:
                     entry = parse_entry(f)
             except OeuvreError as e:
                 success = False
-                shortpath = fullpath.replace(OEUVRE_DIRECTORY, "").lstrip("/")
-                print(f"Error on {shortpath}: {e}")
+                error(str(e), lineno=e.lineno, path=fullpath, fatal=False)
                 if not confirm("Try again? "):
                     sys.exit(1)
             else:
@@ -206,7 +205,7 @@ def read_entries() -> List[Entry]:
             try:
                 entry = parse_entry(f)
             except OeuvreError as e:
-                error(str(e))
+                error(str(e), lineno=e.lineno, path=path)
 
             entries.append(entry)
     return entries
@@ -514,7 +513,7 @@ def parse_entry(f: IO[str]) -> Entry:
 
         if indented:
             if field is None:
-                raise OeuvreError(f"indented text without a field (line {lineno})")
+                raise OeuvreError(f"indented text without a field", lineno=lineno)
 
             previous_value = entry[field]
             if FIELDS[field].multiple:
@@ -526,14 +525,14 @@ def parse_entry(f: IO[str]) -> Entry:
                 entry[field] = previous_value + sep + line if previous_value else line
         else:
             if ":" not in line:
-                raise OeuvreError(f"un-indented line without a colon (line {lineno})")
+                raise OeuvreError(f"un-indented line without a colon", lineno=lineno)
 
             field, value = line.split(":", maxsplit=1)
             field = field.strip()
             value = value.strip()
 
             if field not in FIELDS:
-                raise OeuvreError(f"unknown field {field!r} (line {lineno})")
+                raise OeuvreError(f"unknown field {field!r}", lineno=lineno)
 
             if FIELDS[field].multiple:
                 if FIELDS[field].keyword_style:
@@ -576,9 +575,30 @@ def make_timestamp() -> str:
     return local.strftime("%a %d %b %Y %I:%M %p %Z")
 
 
-def error(message: str) -> None:
-    print(f"error: {message}", file=sys.stderr)
-    sys.exit(1)
+def error(
+    message: str,
+    *,
+    lineno: Optional[int] = None,
+    path: Optional[str] = None,
+    fatal: bool = True,
+) -> None:
+    location: Optional[str]
+    if path is not None:
+        path = path.replace(OEUVRE_DIRECTORY, "").lstrip("/")
+        if lineno is not None:
+            location = f"{path}, line {lineno}"
+        else:
+            location = path
+    else:
+        location = None
+
+    if location:
+        print(f"error: {message} ({location})", file=sys.stderr)
+    else:
+        print(f"error: {message}", file=sys.stderr)
+
+    if fatal:
+        sys.exit(1)
 
 
 def warning(message: str) -> None:
@@ -586,7 +606,12 @@ def warning(message: str) -> None:
 
 
 class OeuvreError(Exception):
-    pass
+    def __init__(
+        self, *args, lineno: Optional[int] = None, path: Optional[str] = None, **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.lineno = lineno
+        self.path = path
 
 
 if __name__ == "__main__":
