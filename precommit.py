@@ -15,4 +15,4 @@ def init(precommit):
     # Language-specific checks
     precommit.check(checks.PythonFormat())
     precommit.check(checks.PythonLint(args=["--extend-ignore=E731"]))
-    precommit.check(checks.PythonTypes(exclude="^precommit.py$"))
+    precommit.check(checks.PythonTypes(exclude=["precommit.py"]))
