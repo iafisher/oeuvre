@@ -66,6 +66,9 @@ def main_edit(args: argparse.Namespace) -> None:
     Opens the entry for editing and then formats it before saving.
     """
     matching = read_matching_entries(args.terms)
+    if not matching:
+        error("no matching entries")
+
     fullpaths = [
         os.path.join(OEUVRE_DIRECTORY, e["filename"]) for e in matching  # type: ignore
     ]
