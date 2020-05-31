@@ -154,12 +154,25 @@ def main_new(args: argparse.Namespace) -> None:
     while True:
         path = input("Enter the file path to save the entry: ")
         path = path.strip()
+        if not path:
+            continue
+
+        if "/" in path:
+            print("The file path may not contain a slash.")
+            continue
+
+        if entry["type"] == "story":
+            path = os.path.join("stories", path)
+        elif entry["type"] == "film":
+            path = os.path.join("films", path)
+
         fullpath = os.path.join(OEUVRE_DIRECTORY, path)
 
         if os.path.exists(fullpath):
             print("A file already exists at that path.")
-        else:
-            break
+            continue
+
+        break
 
     with open(fullpath, "w", encoding="utf8") as f:
         f.write(longform(entry))
@@ -247,17 +260,21 @@ def confirm(prompt: str) -> bool:
     """
     Prompts the user for confirmation and returns whether they accepted or not.
     """
-    try:
-        yesno = input(prompt)
-    except EOFError:
-        print()
-        return False
-    except KeyboardInterrupt:
-        print()
-        sys.exit(1)
+    while True:
+        try:
+            yesno = input(prompt)
+        except EOFError:
+            print()
+            return False
+        except KeyboardInterrupt:
+            print()
+            sys.exit(1)
 
-    yesno = yesno.strip().lower()
-    return yesno.startswith("y")
+        yesno = yesno.strip().lower()
+        if yesno.startswith("y"):
+            return True
+        elif yesno.startswith("n"):
+            return False
 
 
 def match(entry: Entry, search_terms: List[str], *, partial: bool) -> bool:
