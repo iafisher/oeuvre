@@ -161,6 +161,11 @@ def main_new(args: argparse.Namespace) -> None:
             print("The file path may not contain a slash.")
             continue
 
+        ext = os.path.splitext(path)[1]
+        if ext != ".txt":
+            print("The file path must end with .txt")
+            continue
+
         if entry["type"] == "story":
             path = os.path.join("stories", path)
         elif entry["type"] == "film":
@@ -243,6 +248,12 @@ def prompt_field(fieldname: str, field: "FieldDef") -> Field:
             sys.exit(1)
 
         value = value.strip()
+
+        if field.choices:
+            if value not in field.choices:
+                print("Must be one of: " + ", ".join(sorted(field.choices)))
+                continue
+
         if field.multiple:
             if value:
                 values.append(value)
@@ -366,6 +377,7 @@ class FieldDef:
         searchable=False,
         editable=True,
         keyword_style=False,
+        choices=None,
     ):
         if required and not editable:
             raise OeuvreError("required field must be editable")
@@ -379,6 +391,7 @@ class FieldDef:
         self.searchable = searchable
         self.editable = editable
         self.keyword_style = keyword_style
+        self.choices = choices
 
 
 class KeywordField:
@@ -415,7 +428,7 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
     [
         ("title", FieldDef(required=True, searchable=True)),
         ("creator", FieldDef(searchable=True)),
-        ("type", FieldDef(required=True)),
+        ("type", FieldDef(required=True, choices={"book", "story", "film", "play"})),
         ("year", FieldDef()),
         ("language", FieldDef()),
         ("plot-summary", FieldDef()),
