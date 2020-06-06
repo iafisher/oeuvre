@@ -378,12 +378,19 @@ class FieldDef:
         editable=True,
         keyword_style=False,
         choices=None,
+        longform=False,
     ):
         if required and not editable:
             raise OeuvreError("required field must be editable")
 
         if keyword_style and not multiple:
             raise OeuvreError("multiple must be True if keyword_style is True")
+
+        if alphabetical and not multiple:
+            raise OeuvreError("multiple must be True if alphabetical is True")
+
+        if longform and multiple:
+            raise OeuvreError("multiple must not be True if longform is True")
 
         self.required = required
         self.multiple = multiple
@@ -392,6 +399,7 @@ class FieldDef:
         self.editable = editable
         self.keyword_style = keyword_style
         self.choices = choices
+        self.longform = longform
 
 
 class KeywordField:
@@ -431,7 +439,7 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ("type", FieldDef(required=True, choices={"book", "story", "film", "play"})),
         ("year", FieldDef()),
         ("language", FieldDef()),
-        ("plot-summary", FieldDef()),
+        ("plot-summary", FieldDef(longform=True)),
         (
             "characters",
             FieldDef(
@@ -445,8 +453,8 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
                 multiple=True, alphabetical=True, searchable=True, keyword_style=True
             ),
         ),
-        ("quotes", FieldDef()),
-        ("notes", FieldDef()),
+        ("quotes", FieldDef(longform=True)),
+        ("notes", FieldDef(longform=True)),
         ("last-updated", FieldDef(editable=False)),
         ("created-at", FieldDef(editable=False)),
     ]
@@ -471,6 +479,7 @@ def longform(entry: Entry) -> str:
         value = entry[field]
         if (
             fielddef.multiple
+            or fielddef.longform
             or "\n" in value
             or len(single_line_field(field, value)) > MAXIMUM_LENGTH
         ):
