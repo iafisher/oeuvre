@@ -41,6 +41,7 @@ def main(args: List[str]) -> None:
 
     parser_list = subparsers.add_parser("keywords")
     parser_list.add_argument("--sorted", action="store_true")
+    parser_list.add_argument("field", nargs="?")
     parser_list.set_defaults(func=main_keywords)
 
     parser_new = subparsers.add_parser("new")
@@ -111,6 +112,13 @@ def main_keywords(args: argparse.Namespace) -> None:
     """
     Lists all keywords from the database.
     """
+    if args.field:
+        if args.field not in FIELDS:
+            error(f"{args.field} is not a valid field")
+
+        if not FIELDS[args.field].keyword_style:
+            error(f"{args.field} is not a keyword field")
+
     counter: defaultdict = defaultdict(int)
     entries = read_entries()
     for entry in entries:
@@ -124,9 +132,13 @@ def main_keywords(args: argparse.Namespace) -> None:
             if not FIELDS[field].keyword_style:
                 continue
 
+            if args.field and field != args.field:
+                continue
+
             for keyword in entry[field]:
                 assert isinstance(keyword, KeywordField)
-                counter[field + ":" + keyword.keyword] += 1
+                name = keyword.keyword if args.field else field + ":" + keyword.keyword
+                counter[name] += 1
 
     # Sort by count and then by name if --sorted flag was present. Otherwise, just by
     # name.
