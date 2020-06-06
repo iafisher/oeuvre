@@ -31,222 +31,224 @@ Field = Union[List[str], List["KeywordField"], str]
 Entry = Dict[str, Field]
 
 
-def main(args: List[str]) -> None:
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers()
+class Application:
+    def __init__(self, directory: str) -> None:
+        self.directory = directory
 
-    parser_edit = subparsers.add_parser("edit")
-    parser_edit.add_argument("terms", nargs="*")
-    parser_edit.set_defaults(func=main_edit)
+    def main(self, args: List[str]) -> None:
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers()
 
-    parser_list = subparsers.add_parser("keywords")
-    parser_list.add_argument("--sorted", action="store_true")
-    parser_list.add_argument("field", nargs="?")
-    parser_list.set_defaults(func=main_keywords)
+        parser_edit = subparsers.add_parser("edit")
+        parser_edit.add_argument("terms", nargs="*")
+        parser_edit.set_defaults(func=self.main_edit)
 
-    parser_new = subparsers.add_parser("new")
-    parser_new.set_defaults(func=main_new)
+        parser_list = subparsers.add_parser("keywords")
+        parser_list.add_argument("--sorted", action="store_true")
+        parser_list.add_argument("field", nargs="?")
+        parser_list.set_defaults(func=self.main_keywords)
 
-    parser_search = subparsers.add_parser("search")
-    parser_search.add_argument("terms", nargs="*")
-    parser_search.set_defaults(func=main_search)
+        parser_new = subparsers.add_parser("new")
+        parser_new.set_defaults(func=self.main_new)
 
-    parser_show = subparsers.add_parser("show")
-    parser_show.add_argument("--brief", action="store_true")
-    parser_show.add_argument("terms", nargs="*")
-    parser_show.set_defaults(func=main_show)
+        parser_search = subparsers.add_parser("search")
+        parser_search.add_argument("terms", nargs="*")
+        parser_search.set_defaults(func=self.main_search)
 
-    parsed_args = parser.parse_args(args)
-    if hasattr(parsed_args, "func"):
-        parsed_args.func(parsed_args)
-    else:
-        error("no subcommand")
+        parser_show = subparsers.add_parser("show")
+        parser_show.add_argument("--brief", action="store_true")
+        parser_show.add_argument("terms", nargs="*")
+        parser_show.set_defaults(func=self.main_show)
 
+        parsed_args = parser.parse_args(args)
+        if hasattr(parsed_args, "func"):
+            parsed_args.func(parsed_args)
+        else:
+            error("no subcommand")
 
-def main_edit(args: argparse.Namespace) -> None:
-    """
-    Opens the entry for editing and then formats it before saving.
-    """
-    matching = read_matching_entries(args.terms)
-    if not matching:
-        error("no matching entries")
+    def main_edit(self, args: argparse.Namespace) -> None:
+        """
+        Opens the entry for editing and then formats it before saving.
+        """
+        matching = read_matching_entries(self.directory, args.terms)
+        if not matching:
+            error("no matching entries")
 
-    fullpaths = [
-        os.path.join(OEUVRE_DIRECTORY, e["filename"]) for e in matching  # type: ignore
-    ]
-    while True:
-        editor = os.environ.get("EDITOR", "nano")
-        r = subprocess.run([editor] + fullpaths)
-        if r.returncode != 0:
-            error(f"editor process exited with error code {r.returncode}")
+        fullpaths = [
+            os.path.join(self.directory, e["filename"])  # type: ignore
+            for e in matching
+        ]
+        while True:
+            editor = os.environ.get("EDITOR", "nano")
+            r = subprocess.run([editor] + fullpaths)
+            if r.returncode != 0:
+                error(f"editor process exited with error code {r.returncode}")
 
-        timestamp = make_timestamp()
-        success = True
-        for fullpath in fullpaths:
-            try:
-                with open(fullpath, "r", encoding="utf8") as f:
-                    entry = parse_entry(f)
-            except OeuvreError as e:
-                success = False
-                error(str(e), lineno=e.lineno, path=fullpath, fatal=False)
-                if not confirm("Try again? "):
-                    sys.exit(1)
-            else:
-                entry["last-updated"] = timestamp
-                # Call `to_longform` before opening the file for writing, so that if
-                # there's an error the file is not wiped out.
-                text = to_longform(entry)
-                with open(fullpath, "w", encoding="utf8") as f:
-                    f.write(text)
-                    f.write("\n")
+            timestamp = make_timestamp()
+            success = True
+            for fullpath in fullpaths:
+                try:
+                    with open(fullpath, "r", encoding="utf8") as f:
+                        entry = parse_entry(self.directory, f)
+                except OeuvreError as e:
+                    success = False
+                    error(str(e), lineno=e.lineno, path=fullpath, fatal=False)
+                    if not confirm("Try again? "):
+                        sys.exit(1)
+                else:
+                    entry["last-updated"] = timestamp
+                    # Call `to_longform` before opening the file for writing, so that if
+                    # there's an error the file is not wiped out.
+                    text = to_longform(entry)
+                    with open(fullpath, "w", encoding="utf8") as f:
+                        f.write(text)
+                        f.write("\n")
 
-                # Only print the entry if only one was opened for editing.
-                if len(fullpaths) == 1:
-                    print(text)
+                    # Only print the entry if only one was opened for editing.
+                    if len(fullpaths) == 1:
+                        print(text)
 
-        if success:
+            if success:
+                break
+
+    def main_keywords(self, args: argparse.Namespace) -> None:
+        """
+        Lists all keywords from the database.
+        """
+        if args.field:
+            if args.field not in FIELDS:
+                error(f"{args.field} is not a valid field")
+
+            if not FIELDS[args.field].keyword_style:
+                error(f"{args.field} is not a keyword field")
+
+        counter: defaultdict = defaultdict(int)
+        entries = read_entries(self.directory)
+        for entry in entries:
+            for field in entry:
+                if field not in FIELDS:
+                    continue
+
+                if field == "characters":
+                    continue
+
+                if not FIELDS[field].keyword_style:
+                    continue
+
+                if args.field and field != args.field:
+                    continue
+
+                for keyword in entry[field]:
+                    assert isinstance(keyword, KeywordField)
+                    name = (
+                        keyword.keyword if args.field else field + ":" + keyword.keyword
+                    )
+                    counter[name] += 1
+
+        # Sort by count and then by name if --sorted flag was present. Otherwise, just
+        # by name.
+        key = lambda kv: (-kv[1], kv[0]) if args.sorted else kv[0]
+        for keyword, count in sorted(counter.items(), key=key):
+            print(f"{keyword} ({count})")
+
+    def main_new(self, args: argparse.Namespace) -> None:
+        """
+        Creates a new entry through interactive prompts.
+        """
+        while True:
+            entry = OrderedDict()  # type: Entry
+            for fieldname, field in FIELDS.items():
+                if not field.editable:
+                    continue
+
+                value = prompt_field(fieldname, field)
+                if value:
+                    entry[fieldname] = value
+
+            timestamp = make_timestamp()
+            entry["last-updated"] = timestamp
+            entry["created-at"] = timestamp
+
+            print()
+            print()
+            print(to_longform(entry))
+            print()
+
+            if confirm("Looks good? "):
+                break
+
+        while True:
+            path = input("Enter the file path to save the entry: ")
+            path = path.strip()
+            if not path:
+                continue
+
+            if "/" in path:
+                print("The file path may not contain a slash.")
+                continue
+
+            ext = os.path.splitext(path)[1]
+            if ext != ".txt":
+                print("The file path must end with .txt")
+                continue
+
+            if entry["type"] == "story":
+                path = os.path.join("stories", path)
+            elif entry["type"] == "film":
+                path = os.path.join("films", path)
+
+            fullpath = os.path.join(self.directory, path)
+
+            if os.path.exists(fullpath):
+                print("A file already exists at that path.")
+                continue
+
             break
 
+        with open(fullpath, "w", encoding="utf8") as f:
+            f.write(to_longform(entry))
+            f.write("\n")
 
-def main_keywords(args: argparse.Namespace) -> None:
-    """
-    Lists all keywords from the database.
-    """
-    if args.field:
-        if args.field not in FIELDS:
-            error(f"{args.field} is not a valid field")
-
-        if not FIELDS[args.field].keyword_style:
-            error(f"{args.field} is not a keyword field")
-
-    counter: defaultdict = defaultdict(int)
-    entries = read_entries()
-    for entry in entries:
-        for field in entry:
-            if field not in FIELDS:
-                continue
-
-            if field == "characters":
-                continue
-
-            if not FIELDS[field].keyword_style:
-                continue
-
-            if args.field and field != args.field:
-                continue
-
-            for keyword in entry[field]:
-                assert isinstance(keyword, KeywordField)
-                name = keyword.keyword if args.field else field + ":" + keyword.keyword
-                counter[name] += 1
-
-    # Sort by count and then by name if --sorted flag was present. Otherwise, just by
-    # name.
-    key = lambda kv: (-kv[1], kv[0]) if args.sorted else kv[0]
-    for keyword, count in sorted(counter.items(), key=key):
-        print(f"{keyword} ({count})")
-
-
-def main_new(args: argparse.Namespace) -> None:
-    """
-    Creates a new entry through interactive prompts.
-    """
-    while True:
-        entry = OrderedDict()  # type: Entry
-        for fieldname, field in FIELDS.items():
-            if not field.editable:
-                continue
-
-            value = prompt_field(fieldname, field)
-            if value:
-                entry[fieldname] = value
-
-        timestamp = make_timestamp()
-        entry["last-updated"] = timestamp
-        entry["created-at"] = timestamp
-
-        print()
-        print()
-        print(to_longform(entry))
-        print()
-
-        if confirm("Looks good? "):
-            break
-
-    while True:
-        path = input("Enter the file path to save the entry: ")
-        path = path.strip()
-        if not path:
-            continue
-
-        if "/" in path:
-            print("The file path may not contain a slash.")
-            continue
-
-        ext = os.path.splitext(path)[1]
-        if ext != ".txt":
-            print("The file path must end with .txt")
-            continue
-
-        if entry["type"] == "story":
-            path = os.path.join("stories", path)
-        elif entry["type"] == "film":
-            path = os.path.join("films", path)
-
-        fullpath = os.path.join(OEUVRE_DIRECTORY, path)
-
-        if os.path.exists(fullpath):
-            print("A file already exists at that path.")
-            continue
-
-        break
-
-    with open(fullpath, "w", encoding="utf8") as f:
-        f.write(to_longform(entry))
-        f.write("\n")
-
-
-def main_search(args: argparse.Namespace) -> None:
-    """
-    Searches all database entries and prints the matching ones.
-    """
-    matching = read_matching_entries(args.terms)
-    for entry in sorted(matching, key=alphabetical_key):
-        print(shortform(entry))
-
-
-def main_show(args: argparse.Namespace) -> None:
-    """
-    Prints the full entry that matches the search terms.
-    """
-    matching = read_matching_entries(args.terms)
-    if len(matching) == 0:
-        print("No matching entries.")
-    elif len(matching) > 1:
-        print("Multiple matching entries:")
+    def main_search(self, args: argparse.Namespace) -> None:
+        """
+        Searches all database entries and prints the matching ones.
+        """
+        matching = read_matching_entries(self.directory, args.terms)
         for entry in sorted(matching, key=alphabetical_key):
-            print("  " + shortform(entry))
-    else:
-        print(to_longform(matching[0], brief=args.brief))
+            print(shortform(entry))
+
+    def main_show(self, args: argparse.Namespace) -> None:
+        """
+        Prints the full entry that matches the search terms.
+        """
+        matching = read_matching_entries(self.directory, args.terms)
+        if len(matching) == 0:
+            print("No matching entries.")
+        elif len(matching) > 1:
+            print("Multiple matching entries:")
+            for entry in sorted(matching, key=alphabetical_key):
+                print("  " + shortform(entry))
+        else:
+            print(to_longform(matching[0], brief=args.brief))
 
 
-def read_matching_entries(search_terms: List[str]) -> List[Entry]:
+def read_matching_entries(directory: str, search_terms: List[str]) -> List[Entry]:
     """
     Returns a list of all entries in the database that match the search terms.
     """
-    entries = read_entries()
+    entries = read_entries(directory)
     return [entry for entry in entries if match(entry, search_terms, partial=True)]
 
 
-def read_entries() -> List[Entry]:
+def read_entries(directory: str) -> List[Entry]:
     """
     Returns a list of all entries in the database.
     """
     entries = []
-    for path in sorted(glob.glob(OEUVRE_DIRECTORY + "/**/*.txt", recursive=True)):
+    for path in sorted(glob.glob(directory + "/**/*.txt", recursive=True)):
         with open(path, "r", encoding="utf8") as f:
             try:
-                entry = parse_entry(f)
+                entry = parse_entry(directory, f)
             except OeuvreError as e:
                 error(str(e), lineno=e.lineno, path=path)
 
@@ -582,7 +584,7 @@ def multi_line_field(
             )
 
 
-def parse_entry(f: IO[str]) -> Entry:
+def parse_entry(directory: str, f: IO[str]) -> Entry:
     """
     Reads a database entry from a file object.
 
@@ -642,7 +644,7 @@ def parse_entry(f: IO[str]) -> Entry:
 
         sep = " "
 
-    entry["filename"] = f.name.replace(OEUVRE_DIRECTORY + "/", "")
+    entry["filename"] = f.name.replace(directory + "/", "")
     return entry
 
 
@@ -682,7 +684,6 @@ def error(
 ) -> None:
     location: Optional[str]
     if path is not None:
-        path = path.replace(OEUVRE_DIRECTORY, "").lstrip("/")
         if lineno is not None:
             location = f"{path}, line {lineno}"
         else:
@@ -713,4 +714,5 @@ class OeuvreError(Exception):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    app = Application(OEUVRE_DIRECTORY)
+    app.main(sys.argv[1:])

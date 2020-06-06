@@ -16,3 +16,5 @@ def init(precommit):
     precommit.check(checks.PythonFormat())
     precommit.check(checks.PythonLint(args=["--extend-ignore=E731"]))
     precommit.check(checks.PythonTypes(exclude=["precommit.py"]))
+
+    precommit.check(checks.Command("UnitTests", ["python3", "oeuvre_test.py"]))

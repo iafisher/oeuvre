@@ -1,0 +1,37 @@
+title: Libra
+creator: Don DeLillo
+type: book
+year: 1988
+language: English
+plot-summary:
+  In the aftermath of the failed Bay of Pigs invasion, a group of agents at the
+  CIA hatch a plot to attempt an assassination of President Kennedy and blame it
+  on the Cuban government. Several different factions are involved in the
+  conspiracy and working more or less independently. One faction recruits Cuban
+  exiles, while another settles on Lee Harvey Oswald, a former Marine who
+  defected to the Soviet Union for several years before returning to Texas. At
+  some point, it is decided to actually kill Kennedy rather than missing.
+
+  In the event, Oswald and the Cubans both hit President Kennedy. Oswald is
+  arrested and is himself murdered several days later by Jack Ruby, who was
+  manipulated into doing it by members of the conspiracy. The chapters of the
+  book alternate between Oswald's and various conspirator's perspectives.
+
+locations:
+  Dallas
+  New Orleans
+  Tokyo
+  Moscow
+
+topics:
+  conspiracy
+  espionage
+  military
+
+technical:
+  non-linear
+
+external:
+  postmodernist
+
+last-updated: Sat 30 May 2020 08:44 AM PDT
