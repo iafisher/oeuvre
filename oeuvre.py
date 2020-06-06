@@ -14,6 +14,7 @@ Version: June 2020
 import argparse
 import datetime
 import glob
+import json
 import os
 import readline  # noqa: F401
 import subprocess
@@ -34,6 +35,11 @@ Entry = Dict[str, Field]
 class Application:
     def __init__(self, directory: str) -> None:
         self.directory = directory
+        try:
+            with open(os.path.join(self.directory, "locations.json"), "r") as f:
+                self.locdb = json.load(f)
+        except FileNotFoundError:
+            self.locdb = {}
 
     def main(self, args: List[str]) -> None:
         parser = argparse.ArgumentParser()
@@ -41,6 +47,7 @@ class Application:
 
         parser_edit = subparsers.add_parser("edit")
         parser_edit.add_argument("terms", nargs="*")
+        parser_edit.add_argument("--strict-location", action="store_true")
         parser_edit.set_defaults(func=self.main_edit)
 
         parser_list = subparsers.add_parser("keywords")
@@ -53,6 +60,7 @@ class Application:
 
         parser_search = subparsers.add_parser("search")
         parser_search.add_argument("terms", nargs="*")
+        parser_search.add_argument("--strict-location", action="store_true")
         parser_search.set_defaults(func=self.main_search)
 
         parser_show = subparsers.add_parser("show")
@@ -70,7 +78,8 @@ class Application:
         """
         Opens the entry for editing and then formats it before saving.
         """
-        matching = read_matching_entries(self.directory, args.terms)
+        locdb = {} if args.strict_location else self.locdb
+        matching = read_matching_entries(self.directory, args.terms, locdb=locdb)
         if not matching:
             error("no matching entries")
 
@@ -213,7 +222,8 @@ class Application:
         """
         Searches all database entries and prints the matching ones.
         """
-        matching = read_matching_entries(self.directory, args.terms)
+        locdb = {} if args.strict_location else self.locdb
+        matching = read_matching_entries(self.directory, args.terms, locdb=locdb)
         for entry in sorted(matching, key=alphabetical_key):
             print(shortform(entry))
 
@@ -221,7 +231,7 @@ class Application:
         """
         Prints the full entry that matches the search terms.
         """
-        matching = read_matching_entries(self.directory, args.terms)
+        matching = read_matching_entries(self.directory, args.terms, locdb=self.locdb)
         if len(matching) == 0:
             print("No matching entries.")
         elif len(matching) > 1:
@@ -232,12 +242,18 @@ class Application:
             print(to_longform(matching[0], brief=args.brief))
 
 
-def read_matching_entries(directory: str, search_terms: List[str]) -> List[Entry]:
+def read_matching_entries(
+    directory: str, search_terms: List[str], *, locdb: Dict[str, List[str]]
+) -> List[Entry]:
     """
     Returns a list of all entries in the database that match the search terms.
     """
     entries = read_entries(directory)
-    return [entry for entry in entries if match(entry, search_terms, partial=True)]
+    return [
+        entry
+        for entry in entries
+        if match(entry, search_terms, partial=True, locdb=locdb)
+    ]
 
 
 def read_entries(directory: str) -> List[Entry]:
@@ -312,7 +328,9 @@ def confirm(prompt: str) -> bool:
             return False
 
 
-def match(entry: Entry, search_terms: List[str], *, partial: bool) -> bool:
+def match(
+    entry: Entry, search_terms: List[str], *, partial: bool, locdb: Dict[str, List[str]]
+) -> bool:
     """
     Returns True if the entry matches the search terms.
 
@@ -322,11 +340,14 @@ def match(entry: Entry, search_terms: List[str], *, partial: bool) -> bool:
     `civil-war`.
     """
     return all(
-        match_one(entry, search_term, partial=partial) for search_term in search_terms
+        match_one(entry, search_term, partial=partial, locdb=locdb)
+        for search_term in search_terms
     )
 
 
-def match_one(entry: Entry, search_term: str, *, partial: bool) -> bool:
+def match_one(
+    entry: Entry, search_term: str, *, partial: bool, locdb: Dict[str, List[str]]
+) -> bool:
     """
     Returns True if the entry matches the single search term.
 
@@ -347,21 +368,56 @@ def match_one(entry: Entry, search_term: str, *, partial: bool) -> bool:
             field for field, fielddef in FIELDS.items() if fielddef.searchable
         ] + ["filename"]
 
-    matches = False
     for field in fields_to_match:
         if field not in entry:
             continue
 
         field_value = entry[field]
-        if isinstance(field_value, list):
-            matches = matches or any(
+        if search_field == "locations":
+            if match_location(field_value, term, locdb):  # type: ignore
+                return True
+        elif isinstance(field_value, list):
+            if any(
                 pred(v.keyword if isinstance(v, KeywordField) else v)
                 for v in field_value
-            )
+            ):
+                return True
         else:
-            matches = matches or pred(field_value)
+            if pred(field_value):
+                return True
 
-    return matches
+    return False
+
+
+def match_location(
+    locations: List["KeywordField"], search_term: str, locdb: Dict[str, List[str]]
+) -> bool:
+    """
+    Returns True if any of the locations match the search term.
+    """
+    for location in locations:
+        if location.keyword == search_term:
+            return True
+
+        enclosing = get_enclosing_locations(locdb, location.keyword)
+        if search_term in enclosing:
+            return True
+
+    return False
+
+
+def get_enclosing_locations(locdb: Dict[str, List[str]], location: str) -> List[str]:
+    """
+    Returns all locations that include the given location in the database.
+    """
+    if location in locdb:
+        direct_enclosing = locdb[location]
+        indirect_enclosing = []
+        for enclosing in direct_enclosing:
+            indirect_enclosing.extend(get_enclosing_locations(locdb, enclosing))
+        return direct_enclosing + indirect_enclosing
+    else:
+        return []
 
 
 def split_term(term: str) -> Tuple[str, str]:
@@ -470,7 +526,12 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
                 multiple=True, alphabetical=False, searchable=True, keyword_style=True
             ),
         ),
-        ("locations", FieldDef(multiple=True, alphabetical=False, searchable=True)),
+        (
+            "locations",
+            FieldDef(
+                multiple=True, alphabetical=False, searchable=True, keyword_style=True
+            ),
+        ),
         (
             "topics",
             FieldDef(
