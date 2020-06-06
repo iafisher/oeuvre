@@ -438,7 +438,6 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
                 multiple=True, alphabetical=False, searchable=True, keyword_style=True
             ),
         ),
-        ("themes", FieldDef(searchable=True)),
         ("locations", FieldDef(multiple=True, alphabetical=False, searchable=True)),
         (
             "keywords",
@@ -648,5 +647,4 @@ class OeuvreError(Exception):
 
 
 if __name__ == "__main__":
-    x = 2 + 2
     main(sys.argv[1:])
