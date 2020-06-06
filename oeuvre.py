@@ -9,7 +9,7 @@ script helps me manage this database by
 
 
 Author:  Ian Fisher (iafisher@protonmail.com)
-Version: May 2020
+Version: June 2020
 """
 import argparse
 import datetime
@@ -114,10 +114,19 @@ def main_keywords(args: argparse.Namespace) -> None:
     counter: defaultdict = defaultdict(int)
     entries = read_entries()
     for entry in entries:
-        if "keywords" in entry:
-            for keyword in entry["keywords"]:
+        for field in entry:
+            if field not in FIELDS:
+                continue
+
+            if field == "characters":
+                continue
+
+            if not FIELDS[field].keyword_style:
+                continue
+
+            for keyword in entry[field]:
                 assert isinstance(keyword, KeywordField)
-                counter[keyword.keyword] += 1
+                counter[field + ":" + keyword.keyword] += 1
 
     # Sort by count and then by name if --sorted flag was present. Otherwise, just by
     # name.
@@ -449,7 +458,25 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ),
         ("locations", FieldDef(multiple=True, alphabetical=False, searchable=True)),
         (
-            "keywords",
+            "topics",
+            FieldDef(
+                multiple=True, alphabetical=True, searchable=True, keyword_style=True
+            ),
+        ),
+        (
+            "settings",
+            FieldDef(
+                multiple=True, alphabetical=True, searchable=True, keyword_style=True
+            ),
+        ),
+        (
+            "technical",
+            FieldDef(
+                multiple=True, alphabetical=True, searchable=True, keyword_style=True
+            ),
+        ),
+        (
+            "external",
             FieldDef(
                 multiple=True, alphabetical=True, searchable=True, keyword_style=True
             ),
@@ -485,6 +512,7 @@ def to_longform(entry: Entry, *, brief: bool = False) -> str:
                 lines.append(single_line_field(field, "<hidden>"))
             else:
                 lines.extend(list(multi_line_field(field, value, alphabetical=False)))
+                lines.append("")
         elif (
             fielddef.multiple
             or "\n" in value
