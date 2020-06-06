@@ -51,6 +51,7 @@ def main(args: List[str]) -> None:
     parser_search.set_defaults(func=main_search)
 
     parser_show = subparsers.add_parser("show")
+    parser_show.add_argument("--brief", action="store_true")
     parser_show.add_argument("terms", nargs="*")
     parser_show.set_defaults(func=main_show)
 
@@ -91,9 +92,9 @@ def main_edit(args: argparse.Namespace) -> None:
                     sys.exit(1)
             else:
                 entry["last-updated"] = timestamp
-                # Call `longform` before opening the file for writing, so that if
+                # Call `to_longform` before opening the file for writing, so that if
                 # there's an error the file is not wiped out.
-                text = longform(entry)
+                text = to_longform(entry)
                 with open(fullpath, "w", encoding="utf8") as f:
                     f.write(text)
                     f.write("\n")
@@ -145,7 +146,7 @@ def main_new(args: argparse.Namespace) -> None:
 
         print()
         print()
-        print(longform(entry))
+        print(to_longform(entry))
         print()
 
         if confirm("Looks good? "):
@@ -180,7 +181,7 @@ def main_new(args: argparse.Namespace) -> None:
         break
 
     with open(fullpath, "w", encoding="utf8") as f:
-        f.write(longform(entry))
+        f.write(to_longform(entry))
         f.write("\n")
 
 
@@ -205,7 +206,7 @@ def main_show(args: argparse.Namespace) -> None:
         for entry in sorted(matching, key=alphabetical_key):
             print("  " + shortform(entry))
     else:
-        print(longform(matching[0]))
+        print(to_longform(matching[0], brief=args.brief))
 
 
 def read_matching_entries(search_terms: List[str]) -> List[Entry]:
@@ -465,11 +466,13 @@ MAXIMUM_LENGTH = 80
 INDENT = "  "
 
 
-def longform(entry: Entry) -> str:
+def to_longform(entry: Entry, *, brief: bool = False) -> str:
     """
     Returns the full string representation of the entry.
 
     This is the form that is written to file.
+
+    If `brief` is True, then the values of fields marked `longform` are not printed.
     """
     lines = []
     for field, fielddef in FIELDS.items():
@@ -477,9 +480,13 @@ def longform(entry: Entry) -> str:
             continue
 
         value = entry[field]
-        if (
+        if fielddef.longform:
+            if brief:
+                lines.append(single_line_field(field, "<hidden>"))
+            else:
+                lines.extend(list(multi_line_field(field, value, alphabetical=False)))
+        elif (
             fielddef.multiple
-            or fielddef.longform
             or "\n" in value
             or len(single_line_field(field, value)) > MAXIMUM_LENGTH
         ):
