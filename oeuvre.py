@@ -549,19 +549,29 @@ def parse_entry(f: IO[str]) -> Entry:
     Raises an `OeuvreError` if the file is incorrectly formatted.
     """
     entry = OrderedDict()  # type: Entry
+    # The name of the current field that is being populated.
     field = None
     sep = " "
 
     for lineno, line in enumerate(f, start=1):
         indented = line.startswith("  ")
+        double_indented = line.startswith("    ")
         line = line.strip()
         if not line:
             sep = "\n"
             continue
 
-        if indented:
+        if double_indented and field is not None and FIELDS[field].keyword_style:
+            if not entry[field]:
+                raise OeuvreError("unexpected double indentation", lineno=lineno)
+
+            # If doubly indented and the field is keyword-style, then the line belongs
+            # to the description of the previous keyword.
+            previous_value = entry[field][-1]
+            previous_value.description += " " + line
+        elif indented:
             if field is None:
-                raise OeuvreError(f"indented text without a field", lineno=lineno)
+                raise OeuvreError("indented text without a field", lineno=lineno)
 
             previous_value = entry[field]
             if FIELDS[field].multiple:
@@ -573,7 +583,7 @@ def parse_entry(f: IO[str]) -> Entry:
                 entry[field] = previous_value + sep + line if previous_value else line
         else:
             if ":" not in line:
-                raise OeuvreError(f"un-indented line without a colon", lineno=lineno)
+                raise OeuvreError("un-indented line without a colon", lineno=lineno)
 
             field, value = line.split(":", maxsplit=1)
             field = field.strip()
