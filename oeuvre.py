@@ -55,6 +55,7 @@ class Application:
         parser_list.set_defaults(func=self.main_keywords)
 
         parser_new = subparsers.add_parser("new")
+        parser_new.add_argument("path")
         parser_new.set_defaults(func=self.main_new)
 
         parser_search = subparsers.add_parser("search")
@@ -82,18 +83,9 @@ class Application:
         if not matching:
             error("no matching entries")
 
-        editdir = os.path.join(self.directory, "editing")
-        if not os.path.exists(editdir):
-            os.mkdir(editdir)
-
         editpaths = []
         for e in matching:
-            editpath = os.path.join(editdir, e["filename"].replace("/", "__"))
-            text = format_for_editing(e)
-            with open(editpath, "w", encoding="utf-8") as f:
-                f.write(text)
-                f.write("\n")
-
+            editpath = self.create_entry_for_editing(e)
             editpaths.append(editpath)
 
         while True:
@@ -110,18 +102,12 @@ class Application:
                         entry = parse_entry(self.directory, f)
                 except OeuvreError as e:
                     success = False
-                    error(
-                        str(e),
-                        lineno=e.lineno,
-                        path=original_entry["filename"],
-                        fatal=False,
-                    )
+                    error(str(e), lineno=e.lineno, path=editpath, fatal=False)
                     if not confirm("Try again? "):
                         sys.exit(1)
                 else:
                     # TODO(2020-07-01): Don't save file with new 'last-updated'
                     # timestamp if no changes were made.
-                    entry["filename"] = original_entry["filename"]
                     entry["last-updated"] = timestamp
                     if "created-at" in original_entry:
                         entry["created-at"] = original_entry["created-at"]
@@ -129,6 +115,7 @@ class Application:
                     # Call `format_for_disk` before opening the file for writing, so
                     # that if there's an error the file is not wiped out.
                     text = format_for_disk(entry)
+                    assert isinstance(original_entry["filename"], str)
                     original_full_path = os.path.join(
                         self.directory, original_entry["filename"]
                     )
@@ -185,61 +172,40 @@ class Application:
 
     def main_new(self, args: argparse.Namespace) -> None:
         """
-        Creates a new entry through interactive prompts.
+        Creates a new entry.
         """
+        editpath = self.create_entry_for_editing({"filename": "new_entry.txt"})
         while True:
-            entry = OrderedDict()  # type: Entry
-            for fieldname, field in FIELDS.items():
-                if not field.editable:
-                    continue
-
-                value = prompt_field(fieldname, field)
-                if value:
-                    entry[fieldname] = value
+            editor = os.environ.get("EDITOR", "nano")
+            r = subprocess.run([editor, editpath])
+            if r.returncode != 0:
+                error(f"editor process exited with error code {r.returncode}")
 
             timestamp = make_timestamp()
-            entry["last-updated"] = timestamp
-            entry["created-at"] = timestamp
+            try:
+                with open(editpath, "r", encoding="utf8") as f:
+                    entry = parse_entry(self.directory, f)
+            except OeuvreError as e:
+                error(str(e), lineno=e.lineno, path=editpath, fatal=False)
+                if not confirm("Try again? "):
+                    sys.exit(1)
 
-            print()
-            print()
-            print(format_for_disk(entry))
-            print()
-
-            if confirm("Looks good? "):
-                break
-
-        while True:
-            path = input("Enter the file path to save the entry: ")
-            path = path.strip()
-            if not path:
                 continue
+            else:
+                entry["last-updated"] = timestamp
+                entry["created-at"] = timestamp
 
-            if "/" in path:
-                print("The file path may not contain a slash.")
-                continue
+                # Call `format_for_disk` before opening the file for writing, so
+                # that if there's an error the file is not wiped out.
+                text = format_for_disk(entry)
+                original_full_path = os.path.join(self.directory, args.path)
+                with open(original_full_path, "w", encoding="utf8") as f:
+                    f.write(text)
+                    f.write("\n")
 
-            ext = os.path.splitext(path)[1]
-            if ext != ".txt":
-                print("The file path must end with .txt")
-                continue
-
-            if entry["type"] == "story":
-                path = os.path.join("stories", path)
-            elif entry["type"] == "film":
-                path = os.path.join("films", path)
-
-            fullpath = os.path.join(self.directory, path)
-
-            if os.path.exists(fullpath):
-                print("A file already exists at that path.")
-                continue
+                print(text)
 
             break
-
-        with open(fullpath, "w", encoding="utf8") as f:
-            f.write(format_for_disk(entry))
-            f.write("\n")
 
     def main_search(self, args: argparse.Namespace) -> None:
         """
@@ -263,6 +229,22 @@ class Application:
                 print("  " + format_for_display(entry))
         else:
             print(format_for_disk(matching[0], brief=args.brief))
+
+    def create_entry_for_editing(self, original_entry: Entry) -> str:
+        """
+        Creates a temporary file for editing the given entry and returns the file path.
+        """
+        editdir = os.path.join(self.directory, "editing")
+        if not os.path.exists(editdir):
+            os.mkdir(editdir)
+
+        editpath = os.path.join(editdir, original_entry["filename"].replace("/", "__"))
+        text = format_for_editing(original_entry)
+        with open(editpath, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.write("\n")
+
+        return editpath
 
 
 def read_matching_entries(
@@ -296,41 +278,6 @@ def read_entries(directory: str) -> List[Entry]:
 
             entries.append(entry)
     return entries
-
-
-def prompt_field(fieldname: str, field: "FieldDef") -> Field:
-    """
-    Prompts for the field based on its definition (required, accepts multiple values).
-    """
-    values = []
-    while True:
-        try:
-            value = input(fieldname + "? ")
-        except EOFError:
-            print()
-            value = ""
-        except KeyboardInterrupt:
-            print()
-            sys.exit(1)
-
-        value = value.strip()
-
-        if field.choices:
-            if value not in field.choices:
-                print("Must be one of: " + ", ".join(sorted(field.choices)))
-                continue
-
-        if field.multiple:
-            if value:
-                values.append(value)
-            elif not field.required:
-                if field.alphabetical:
-                    values.sort()
-
-                return values
-        else:
-            if value or not field.required:
-                return value
 
 
 def confirm(prompt: str) -> bool:
@@ -542,7 +489,12 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
     [
         ("title", FieldDef(required=True, searchable=True)),
         ("creator", FieldDef(searchable=True)),
-        ("type", FieldDef(required=True, choices={"book", "story", "film", "play"})),
+        (
+            "type",
+            FieldDef(
+                required=True, choices={"book", "story", "film", "play", "television"}
+            ),
+        ),
         ("year", FieldDef()),
         ("language", FieldDef()),
         ("plot-summary", FieldDef(longform=True)),
@@ -766,8 +718,26 @@ def parse_entry(directory: str, f: IO[str]) -> Entry:
 
         sep = " "
 
+    validate_entry(entry)
+
     entry["filename"] = f.name.replace(directory + "/", "")
     return entry
+
+
+def validate_entry(entry):
+    """
+    Checks if the entry is valid.
+    """
+    for field, fielddef in FIELDS.items():
+        if fielddef.required and (field not in entry or not entry[field]):
+            raise OeuvreError(f"missing required field {field!r}")
+        elif fielddef.choices:
+            if field not in entry or not entry[field]:
+                continue
+
+            if entry[field] not in fielddef.choices:
+                choices = ", ".join(fielddef.choices)
+                raise OeuvreError(f"value of field {field!r} must be one of: {choices}")
 
 
 def alphabetical_key(entry):
