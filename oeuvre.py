@@ -7,9 +7,8 @@ script helps me manage this database by
 
 - assisting with data entry and automatically formatting the entries nicely.
 
-
 Author:  Ian Fisher (iafisher@protonmail.com)
-Version: June 2020
+Version: July 2020
 """
 import argparse
 import datetime
@@ -24,7 +23,7 @@ from collections import defaultdict, OrderedDict
 from typing import Dict, IO, Iterator, List, Optional, Tuple, Union
 
 
-OEUVRE_DIRECTORY = "/home/iafisher/Dropbox/oeuvre"
+OEUVRE_DIRECTORY = "/home/iafisher/files/oeuvre"
 
 
 # Type definitions
@@ -83,38 +82,62 @@ class Application:
         if not matching:
             error("no matching entries")
 
-        fullpaths = [
-            os.path.join(self.directory, e["filename"])  # type: ignore
-            for e in matching
-        ]
+        editdir = os.path.join(self.directory, "editing")
+        if not os.path.exists(editdir):
+            os.mkdir(editdir)
+
+        editpaths = []
+        for e in matching:
+            editpath = os.path.join(editdir, e["filename"].replace("/", "__"))
+            text = format_for_editing(e)
+            with open(editpath, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.write("\n")
+
+            editpaths.append(editpath)
+
         while True:
             editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor] + fullpaths)
+            r = subprocess.run([editor] + editpaths)
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
             timestamp = make_timestamp()
             success = True
-            for fullpath in fullpaths:
+            for original_entry, editpath in zip(matching, editpaths):
                 try:
-                    with open(fullpath, "r", encoding="utf8") as f:
+                    with open(editpath, "r", encoding="utf8") as f:
                         entry = parse_entry(self.directory, f)
                 except OeuvreError as e:
                     success = False
-                    error(str(e), lineno=e.lineno, path=fullpath, fatal=False)
+                    error(
+                        str(e),
+                        lineno=e.lineno,
+                        path=original_entry["filename"],
+                        fatal=False,
+                    )
                     if not confirm("Try again? "):
                         sys.exit(1)
                 else:
+                    # TODO(2020-07-01): Don't save file with new 'last-updated'
+                    # timestamp if no changes were made.
+                    entry["filename"] = original_entry["filename"]
                     entry["last-updated"] = timestamp
-                    # Call `to_longform` before opening the file for writing, so that if
-                    # there's an error the file is not wiped out.
-                    text = to_longform(entry)
-                    with open(fullpath, "w", encoding="utf8") as f:
+                    if "created-at" in original_entry:
+                        entry["created-at"] = original_entry["created-at"]
+
+                    # Call `format_for_disk` before opening the file for writing, so
+                    # that if there's an error the file is not wiped out.
+                    text = format_for_disk(entry)
+                    original_full_path = os.path.join(
+                        self.directory, original_entry["filename"]
+                    )
+                    with open(original_full_path, "w", encoding="utf8") as f:
                         f.write(text)
                         f.write("\n")
 
                     # Only print the entry if only one was opened for editing.
-                    if len(fullpaths) == 1:
+                    if len(editpaths) == 1:
                         print(text)
 
             if success:
@@ -180,7 +203,7 @@ class Application:
 
             print()
             print()
-            print(to_longform(entry))
+            print(format_for_disk(entry))
             print()
 
             if confirm("Looks good? "):
@@ -215,7 +238,7 @@ class Application:
             break
 
         with open(fullpath, "w", encoding="utf8") as f:
-            f.write(to_longform(entry))
+            f.write(format_for_disk(entry))
             f.write("\n")
 
     def main_search(self, args: argparse.Namespace) -> None:
@@ -225,7 +248,7 @@ class Application:
         locdb = {} if args.strict_location else self.locdb
         matching = read_matching_entries(self.directory, args.terms, locdb=locdb)
         for entry in sorted(matching, key=alphabetical_key):
-            print(shortform(entry))
+            print(format_for_display(entry))
 
     def main_show(self, args: argparse.Namespace) -> None:
         """
@@ -237,9 +260,9 @@ class Application:
         elif len(matching) > 1:
             print("Multiple matching entries:")
             for entry in sorted(matching, key=alphabetical_key):
-                print("  " + shortform(entry))
+                print("  " + format_for_display(entry))
         else:
-            print(to_longform(matching[0], brief=args.brief))
+            print(format_for_disk(matching[0], brief=args.brief))
 
 
 def read_matching_entries(
@@ -262,6 +285,9 @@ def read_entries(directory: str) -> List[Entry]:
     """
     entries = []
     for path in sorted(glob.glob(directory + "/**/*.txt", recursive=True)):
+        if path.startswith(directory + "/editing/"):
+            continue
+
         with open(path, "r", encoding="utf8") as f:
             try:
                 entry = parse_entry(directory, f)
@@ -431,7 +457,7 @@ def split_term(term: str) -> Tuple[str, str]:
         return ("", term)
 
 
-def shortform(entry: Entry) -> str:
+def format_for_display(entry: Entry) -> str:
     """
     Returns the short string representation of the entry.
 
@@ -568,11 +594,43 @@ MAXIMUM_LENGTH = 80
 INDENT = "  "
 
 
-def to_longform(entry: Entry, *, brief: bool = False) -> str:
+def format_for_editing(entry: Entry) -> str:
     """
-    Returns the full string representation of the entry.
+    Returns the editable string representation of the entry.
 
-    This is the form that is written to file.
+    As opposed to `format_for_disk`, blank fields are included and non-editable fields
+    are excluded.
+    """
+    lines = []
+    for field, fielddef in FIELDS.items():
+        if not fielddef.editable:
+            continue
+
+        value = entry.get(field, "")
+        if fielddef.longform:
+            lines.extend(list(multi_line_field(field, value, alphabetical=False)))
+            lines.append("")
+        elif (
+            fielddef.multiple
+            or "\n" in value
+            or len(single_line_field(field, value)) > MAXIMUM_LENGTH
+        ):
+            lines.extend(
+                list(multi_line_field(field, value, alphabetical=fielddef.alphabetical))
+            )
+            lines.append("")
+        else:
+            lines.append(single_line_field(field, value))
+
+    if lines and not lines[-1]:
+        lines.pop()
+
+    return "\n".join(lines)
+
+
+def format_for_disk(entry: Entry, *, brief: bool = False) -> str:
+    """
+    Returns the string representation of the entry to be written to disk.
 
     If `brief` is True, then the values of fields marked `longform` are not printed.
     """
@@ -582,6 +640,9 @@ def to_longform(entry: Entry, *, brief: bool = False) -> str:
             continue
 
         value = entry[field]
+        if not value:
+            continue
+
         if fielddef.longform:
             if brief:
                 lines.append(single_line_field(field, "<hidden>"))
@@ -713,7 +774,7 @@ def alphabetical_key(entry):
     """
     Key for sort functions to sort entries alphabetically.
     """
-    name = shortform(entry)
+    name = format_for_display(entry)
     if name.startswith("The "):
         return name[4:]
     elif name.startswith(("Le ", "La ")):
