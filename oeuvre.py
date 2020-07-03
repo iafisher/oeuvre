@@ -26,6 +26,13 @@ OEUVRE_DIRECTORY = "/home/iafisher/files/oeuvre"
 
 
 class Entry:
+    """
+    A class to represent a database entry.
+
+    Database entries consist of fields, some of them with string values and some of them
+    with list values. Most fields can be omitted.
+    """
+
     def __init__(
         self,
         *,
@@ -74,7 +81,10 @@ class Entry:
         return self._format(verbosity=VERBOSITY_FULL, display=False)
 
     def _format(self, *, display: bool, verbosity: int) -> str:
-        builder = FieldBuilder(display=display, verbosity=verbosity)
+        """
+        Core internal method for formatting entries.
+        """
+        builder = EntryStringBuilder(display=display, verbosity=verbosity)
         builder.field("title", self.title)
         builder.field("creator", self.creator)
         builder.field("type", self.type)
@@ -98,7 +108,15 @@ class Entry:
 
 
 class Application:
+    """
+    A class to represent the oeuvre application.
+    """
+
     def __init__(self, directory: str) -> None:
+        """
+        Args:
+          directory: The path to the directory where the database entries are located.
+        """
         self.directory = directory
         try:
             with open(os.path.join(self.directory, "locations.json"), "r") as f:
@@ -107,6 +125,9 @@ class Application:
             self.locdb = {}
 
     def main(self, args: List[str]) -> None:
+        """
+        Runs the program with the given command-line arguments.
+        """
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
 
@@ -144,7 +165,7 @@ class Application:
 
     def main_edit(self, args: argparse.Namespace) -> None:
         """
-        Opens the entry for editing and then formats it before saving.
+        Opens the entry for editing and formats it before saving.
         """
         locdb = {} if args.strict_location else self.locdb
         matching = self.read_matching_entries(args.terms, locdb=locdb)
@@ -330,27 +351,6 @@ class Application:
         return entries
 
 
-def confirm(prompt: str) -> bool:
-    """
-    Prompts the user for confirmation and returns whether they accepted or not.
-    """
-    while True:
-        try:
-            yesno = input(prompt)
-        except EOFError:
-            print()
-            return False
-        except KeyboardInterrupt:
-            print()
-            sys.exit(1)
-
-        yesno = yesno.strip().lower()
-        if yesno.startswith("y"):
-            return True
-        elif yesno.startswith("n"):
-            return False
-
-
 def match(
     entry: Entry, search_terms: List[str], *, partial: bool, locdb: Dict[str, List[str]]
 ) -> bool:
@@ -460,6 +460,11 @@ def split_term(term: str) -> Tuple[str, str]:
 
 
 class KeywordField:
+    """
+    A field with a keyword value, which includes the keyword itself and an optional
+    description.
+    """
+
     def __init__(self, keyword: str, description: Optional[str]) -> None:
         self.keyword = keyword
         self.description = description
@@ -504,19 +509,34 @@ VERBOSITY_BRIEF = 0
 VERBOSITY_FULL = 1
 
 
-class FieldBuilder:
+class EntryStringBuilder:
+    """
+    A class to build a string representation of an Entry object.
+    """
+
     def __init__(self, *, display: bool, verbosity: int) -> None:
+        """
+        Args:
+          display: Whether the field is for display to the user.
+          verbosity: The desired level of verbosity in the output.
+        """
         self.display = display
         self.verbosity = verbosity
         self.lines: List[str] = []
 
     def field(self, field: str, value: Optional[str]) -> None:
+        """
+        Adds a regular, single-line field.
+        """
         if value:
             self.lines.append(f"{field}: {value}")
         elif not self.display:
             self.lines.append(f"{field}:")
 
     def longform_field(self, field: str, value: Optional[str]) -> None:
+        """
+        Adds a longform field.
+        """
         if not value:
             if not self.display:
                 self.lines.append(f"{field}:")
@@ -549,6 +569,9 @@ class FieldBuilder:
     def list_field(
         self, field: str, values: List["KeywordField"], alphabetical: bool
     ) -> None:
+        """
+        Adds a list field.
+        """
         if not values:
             if not self.display:
                 self.lines.append(f"{field}:")
@@ -576,6 +599,9 @@ class FieldBuilder:
         self.lines.append("")
 
     def build(self) -> str:
+        """
+        Builds the accumulated fields into a string.
+        """
         return "\n".join(self.lines).strip("\n")
 
 
@@ -724,6 +750,27 @@ def alphabetical_key(entry: Entry) -> str:
         return name[3:]
     else:
         return name
+
+
+def confirm(prompt: str) -> bool:
+    """
+    Prompts the user for confirmation and returns whether they accepted or not.
+    """
+    while True:
+        try:
+            yesno = input(prompt)
+        except EOFError:
+            print()
+            return False
+        except KeyboardInterrupt:
+            print()
+            sys.exit(1)
+
+        yesno = yesno.strip().lower()
+        if yesno.startswith("y"):
+            return True
+        elif yesno.startswith("n"):
+            return False
 
 
 def error(message: str, *, fatal: bool = True) -> None:
