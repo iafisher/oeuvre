@@ -517,10 +517,10 @@ def _format_entry(entry: Entry, *, display: bool, verbosity: int) -> Iterable[st
         "external", entry.external, alphabetical=True, display=display
     )
     yield from emit_longform_field(
-        "quotes", entry.quotes, display=display, verbosity=verbosity
+        "notes", entry.notes, display=display, verbosity=verbosity
     )
     yield from emit_longform_field(
-        "notes", entry.notes, display=display, verbosity=verbosity
+        "quotes", entry.quotes, display=display, verbosity=verbosity
     )
 
 
