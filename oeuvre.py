@@ -61,6 +61,36 @@ class Entry:
         self.quotes = quotes
         self.notes = notes
 
+    def format_for_display(self, *, verbosity: int) -> str:
+        """
+        Returns a string representation of the entry for display to the user.
+        """
+        return self._format(verbosity=verbosity, display=True)
+
+    def format_for_disk(self) -> str:
+        """
+        Returns the string representation of the entry to be written to disk.
+        """
+        return self._format(verbosity=VERBOSITY_FULL, display=False)
+
+    def _format(self, *, display: bool, verbosity: int) -> str:
+        builder = FieldBuilder(display=display, verbosity=verbosity)
+        builder.field("title", self.title)
+        builder.field("creator", self.creator)
+        builder.field("type", self.type)
+        builder.field("year", str(self.year) if self.year is not None else None)
+        builder.field("language", self.language)
+        builder.longform_field("plot-summary", self.plot_summary)
+        builder.list_field("characters", self.characters, alphabetical=False)
+        builder.list_field("locations", self.locations, alphabetical=False)
+        builder.list_field("topics", self.topics, alphabetical=True)
+        builder.list_field("settings", self.settings, alphabetical=True)
+        builder.list_field("technical", self.technical, alphabetical=True)
+        builder.list_field("external", self.external, alphabetical=True)
+        builder.longform_field("notes", self.notes)
+        builder.longform_field("quotes", self.quotes)
+        return builder.build()
+
     def __str__(self) -> str:
         creator_suffix = f" ({self.creator})" if self.creator else ""
         filename_suffix = f" [{self.filename}]" if self.filename else ""
@@ -149,7 +179,7 @@ class Application:
                 else:
                     # Call `format_for_disk` before opening the file for writing, so
                     # that if there's an error the file is not wiped out.
-                    text = format_for_disk(entry)
+                    text = entry.format_for_disk()
                     with open(path, "w", encoding="utf8") as f:
                         f.write(text)
                         f.write("\n")
@@ -186,7 +216,7 @@ class Application:
             error(f"{path} already exists.")
 
         blank_entry = Entry(title="", type="")
-        text = format_for_disk(blank_entry)
+        text = blank_entry.format_for_disk()
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
             f.write("\n")
@@ -213,7 +243,7 @@ class Application:
             else:
                 # Call `format_for_disk` before opening the file for writing, so
                 # that if there's an error the file is not wiped out.
-                text = format_for_disk(entry)
+                text = entry.format_for_disk()
                 with open(path, "w", encoding="utf8") as f:
                     f.write(text)
                     f.write("\n")
@@ -234,7 +264,7 @@ class Application:
                 continue
 
             path = os.path.join(self.directory, entry.filename)
-            text = format_for_disk(entry)
+            text = entry.format_for_disk()
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
                 f.write("\n")
@@ -261,7 +291,7 @@ class Application:
                 print("  " + str(entry))
         else:
             verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
-            print(format_for_display(matching[0], verbosity=verbosity))
+            print(matching[0].format_for_display(verbosity=verbosity))
 
     def read_matching_entries(
         self, search_terms: List[str], *, locdb: Dict[str, List[str]]
@@ -450,6 +480,9 @@ class KeywordField:
         return bool(self.keyword or self.description)
 
     def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self.keyword == other
+
         if not isinstance(other, KeywordField):
             return False
 
@@ -471,139 +504,79 @@ VERBOSITY_BRIEF = 0
 VERBOSITY_FULL = 1
 
 
-def format_for_display(entry: Entry, *, verbosity: int) -> str:
-    """
-    Returns a string representation of the entry for display to the user.
-    """
-    lines = _format_entry(entry, verbosity=verbosity, display=True)
-    return "\n".join(list(lines)).rstrip("\n")
+class FieldBuilder:
+    def __init__(self, *, display: bool, verbosity: int) -> None:
+        self.display = display
+        self.verbosity = verbosity
+        self.lines: List[str] = []
 
+    def field(self, field: str, value: Optional[str]) -> None:
+        if value:
+            self.lines.append(f"{field}: {value}")
+        elif not self.display:
+            self.lines.append(f"{field}:")
 
-def format_for_disk(entry: Entry) -> str:
-    """
-    Returns the string representation of the entry to be written to disk.
-    """
-    lines = _format_entry(entry, verbosity=VERBOSITY_FULL, display=False)
-    return "\n".join(list(lines)).rstrip("\n")
-
-
-def _format_entry(entry: Entry, *, display: bool, verbosity: int) -> Iterable[str]:
-    yield from emit_field("title", entry.title, display=display)
-    yield from emit_field("creator", entry.creator, display=display)
-    yield from emit_field("type", entry.type, display=display)
-    yield from emit_field(
-        "year", str(entry.year) if entry.year is not None else None, display=display
-    )
-    yield from emit_field("language", entry.language, display=display)
-    yield from emit_longform_field(
-        "plot-summary", entry.plot_summary, display=display, verbosity=verbosity
-    )
-    yield from emit_list_field(
-        "characters", entry.characters, alphabetical=False, display=display
-    )
-    yield from emit_list_field(
-        "locations", entry.locations, alphabetical=False, display=display
-    )
-    yield from emit_list_field(
-        "topics", entry.topics, alphabetical=True, display=display
-    )
-    yield from emit_list_field(
-        "settings", entry.settings, alphabetical=True, display=display
-    )
-    yield from emit_list_field(
-        "technical", entry.technical, alphabetical=True, display=display
-    )
-    yield from emit_list_field(
-        "external", entry.external, alphabetical=True, display=display
-    )
-    yield from emit_longform_field(
-        "notes", entry.notes, display=display, verbosity=verbosity
-    )
-    yield from emit_longform_field(
-        "quotes", entry.quotes, display=display, verbosity=verbosity
-    )
-
-
-def emit_field(field: str, value: Optional[str], *, display: bool) -> Iterable[str]:
-    """
-    Yields the formatted lines for a regular field.
-    """
-    if value:
-        yield f"{field}: {value}"
-    else:
-        if display:
+    def longform_field(self, field: str, value: Optional[str]) -> None:
+        if not value:
+            if not self.display:
+                self.lines.append(f"{field}:")
+                self.lines.append("")
             return
-        else:
-            yield field + ":"
 
+        if self.verbosity == VERBOSITY_BRIEF:
+            self.lines.append(f"{field}: <hidden>")
+            return
 
-def emit_longform_field(
-    field: str, value: Optional[str], *, display: bool, verbosity: int
-) -> Iterable[str]:
-    """
-    Yields the formatted lines for a longform field.
-    """
-    if not value:
-        if not display:
-            yield field + ":"
-            yield ""
-        return
+        self.lines.append(f"{field}:")
+        for i, paragraph in enumerate(value.splitlines()):
+            if i != 0:
+                self.lines.append("")
 
-    if verbosity == VERBOSITY_BRIEF:
-        yield f"{field}: <hidden>"
-        return
+            if self.display:
+                self.lines.append(
+                    textwrap.fill(
+                        paragraph,
+                        width=MAXIMUM_LENGTH,
+                        initial_indent=INDENT,
+                        subsequent_indent=INDENT,
+                    )
+                )
+            else:
+                self.lines.append(INDENT + paragraph)
 
-    yield field + ":"
-    for i, paragraph in enumerate(value.splitlines()):
-        if i != 0:
-            yield ""
+        self.lines.append("")
 
-        if display:
-            yield from textwrap.wrap(
-                paragraph,
-                width=MAXIMUM_LENGTH,
-                initial_indent=INDENT,
-                subsequent_indent=INDENT,
-            )
-        else:
-            yield INDENT + paragraph
+    def list_field(
+        self, field: str, values: List["KeywordField"], alphabetical: bool
+    ) -> None:
+        if not values:
+            if not self.display:
+                self.lines.append(f"{field}:")
+                self.lines.append("")
+            return
 
-    yield ""
+        stringvalues: Iterable[str] = map(str, values)
+        if alphabetical:
+            stringvalues = sorted(stringvalues)
 
+        self.lines.append(f"{field}:")
+        for value in stringvalues:
+            if self.display:
+                self.lines.append(
+                    textwrap.fill(
+                        value,
+                        width=MAXIMUM_LENGTH,
+                        initial_indent=INDENT,
+                        subsequent_indent=(INDENT * 2),
+                    )
+                )
+            else:
+                self.lines.append(INDENT + value)
 
-def emit_list_field(
-    field: str,
-    values: Union[List["KeywordField"], List[str]],
-    *,
-    alphabetical: bool,
-    display: bool,
-) -> Iterable[str]:
-    """
-    Yields the formatted lines for a list field.
-    """
-    if not values:
-        if not display:
-            yield field + ":"
-            yield ""
-        return
+        self.lines.append("")
 
-    stringvalues: Iterable[str] = map(str, values)
-    if alphabetical:
-        stringvalues = sorted(stringvalues)
-
-    yield field + ":"
-    for value in stringvalues:
-        if display:
-            yield from textwrap.wrap(
-                value,
-                width=MAXIMUM_LENGTH,
-                initial_indent=INDENT,
-                subsequent_indent=(INDENT * 2),
-            )
-        else:
-            yield INDENT + value
-
-    yield ""
+    def build(self) -> str:
+        return "\n".join(self.lines).strip("\n")
 
 
 def parse_entry(text: str) -> Entry:
