@@ -99,15 +99,11 @@ locations:
   Tokyo
   Moscow
 
-topics:
+keywords:
   conspiracy
   espionage
   military
-
-technical:
   non-linear
-
-external:
   postmodernist
 """
 
@@ -137,15 +133,11 @@ locations:
   Tokyo
   Moscow
 
-topics:
+keywords:
   conspiracy
   espionage
   military
-
-technical:
   non-linear
-
-external:
   postmodernist
 """
 

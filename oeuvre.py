@@ -45,10 +45,8 @@ class Entry:
         plot_summary: Optional[str] = None,
         characters: Optional[List["KeywordField"]] = None,
         locations: Optional[List["KeywordField"]] = None,
-        topics: Optional[List["KeywordField"]] = None,
+        keywords: Optional[List["KeywordField"]] = None,
         settings: Optional[List["KeywordField"]] = None,
-        technical: Optional[List["KeywordField"]] = None,
-        external: Optional[List["KeywordField"]] = None,
         quotes: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> None:
@@ -61,10 +59,8 @@ class Entry:
         self.plot_summary = plot_summary
         self.characters = characters or []
         self.locations = locations or []
-        self.topics = topics or []
+        self.keywords = keywords or []
         self.settings = settings or []
-        self.technical = technical or []
-        self.external = external or []
         self.quotes = quotes
         self.notes = notes
 
@@ -102,10 +98,8 @@ class Entry:
         builder.longform_field("plot-summary", self.plot_summary)
         builder.list_field("characters", self.characters, alphabetical=False)
         builder.list_field("locations", self.locations, alphabetical=False)
-        builder.list_field("topics", self.topics, alphabetical=True)
+        builder.list_field("keywords", self.keywords, alphabetical=True)
         builder.list_field("settings", self.settings, alphabetical=True)
-        builder.list_field("technical", self.technical, alphabetical=True)
-        builder.list_field("external", self.external, alphabetical=True)
         builder.longform_field("notes", self.notes)
         builder.longform_field("quotes", self.quotes)
         return builder.build()
@@ -236,7 +230,7 @@ class Application:
         counter: defaultdict = defaultdict(int)
         entries = self.read_entries()
         for entry in entries:
-            for keyword in entry.topics:
+            for keyword in entry.keywords:
                 counter[keyword.keyword] += 1
 
         # Sort by count and then by name if --sorted flag was present. Otherwise, just
@@ -401,10 +395,8 @@ def match(
             matches.extend(match_field("creator", entry.creator, search_term))
             matches.extend(match_field("characters", entry.characters, search_term))
             matches.extend(match_location(entry.locations, search_term, locdb))
-            matches.extend(match_field("topics", entry.topics, search_term))
+            matches.extend(match_field("keywords", entry.keywords, search_term))
             matches.extend(match_field("settings", entry.settings, search_term))
-            matches.extend(match_field("technical", entry.technical, search_term))
-            matches.extend(match_field("external", entry.external, search_term))
 
     return matches
 
@@ -646,14 +638,7 @@ def parse_entry(text: str) -> Entry:
 
             lines.pop()
             fields[field] = parse_longform_field(lines)
-        elif field in (
-            "characters",
-            "locations",
-            "topics",
-            "settings",
-            "technical",
-            "external",
-        ):
+        elif field in ("characters", "locations", "keywords", "settings"):
             if value:
                 raise OeuvreError("trailing content", lineno=lineno)
 
