@@ -224,7 +224,7 @@ class Application:
 
                     # Only print the entry if only one was opened for editing.
                     if len(matching) == 1:
-                        print(text)
+                        print(entry.format_for_display(verbosity=VERBOSITY_FULL))
 
             if success:
                 break
