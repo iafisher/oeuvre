@@ -70,8 +70,6 @@ technical:
 
 external:
   postmodernist
-
-last-updated: Sat 30 May 2020 08:44 AM PDT
 """
 
 

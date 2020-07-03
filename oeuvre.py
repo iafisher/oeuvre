@@ -11,7 +11,6 @@ Author:  Ian Fisher (iafisher@protonmail.com)
 Version: July 2020
 """
 import argparse
-import datetime
 import glob
 import json
 import os
@@ -97,7 +96,6 @@ class Application:
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
-            timestamp = make_timestamp()
             success = True
             for original_entry, editpath in zip(matching, editpaths):
                 try:
@@ -109,12 +107,6 @@ class Application:
                     if not confirm("Try again? "):
                         sys.exit(1)
                 else:
-                    # TODO(2020-07-01): Don't save file with new 'last-updated'
-                    # timestamp if no changes were made.
-                    entry["last-updated"] = timestamp
-                    if "created-at" in original_entry:
-                        entry["created-at"] = original_entry["created-at"]
-
                     # Call `format_for_disk` before opening the file for writing, so
                     # that if there's an error the file is not wiped out.
                     text = format_for_disk(entry)
@@ -184,7 +176,6 @@ class Application:
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
-            timestamp = make_timestamp()
             try:
                 with open(editpath, "r", encoding="utf8") as f:
                     entry = parse_entry(self.directory, f)
@@ -195,9 +186,6 @@ class Application:
 
                 continue
             else:
-                entry["last-updated"] = timestamp
-                entry["created-at"] = timestamp
-
                 # Call `format_for_disk` before opening the file for writing, so
                 # that if there's an error the file is not wiped out.
                 text = format_for_disk(entry)
@@ -554,8 +542,6 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
         ),
         ("quotes", FieldDef(longform=True)),
         ("notes", FieldDef(longform=True)),
-        ("last-updated", FieldDef(editable=False)),
-        ("created-at", FieldDef(editable=False)),
     ]
 )
 
@@ -769,20 +755,6 @@ def alphabetical_key(entry):
         return name[3:]
     else:
         return name
-
-
-def make_timestamp() -> str:
-    """
-    Returns a timestamp for the current time.
-
-    The exact format of the timestamp is an implementation detail, but it is guaranteed
-    to be human-readable.
-    """
-    # Courtesy of https://stackoverflow.com/questions/25837452/
-    utc = datetime.datetime.now(datetime.timezone.utc)
-    local = utc.astimezone()
-    # e.g., 'Sun 24 May 2020 08:55 AM PDT'
-    return local.strftime("%a %d %b %Y %I:%M %p %Z")
 
 
 def error(
