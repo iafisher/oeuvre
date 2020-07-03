@@ -220,7 +220,7 @@ class Application:
         locdb = {} if args.strict_location else self.locdb
         matching = self.read_matching_entries(args.terms, locdb=locdb)
         for entry in sorted(matching, key=alphabetical_key):
-            print(format_for_display(entry))
+            print(format_for_display(entry, verbosity=VERBOSITY_BRIEF))
 
     def main_show(self, args: argparse.Namespace) -> None:
         """
@@ -232,9 +232,10 @@ class Application:
         elif len(matching) > 1:
             print("Multiple matching entries:")
             for entry in sorted(matching, key=alphabetical_key):
-                print("  " + format_for_display(entry))
+                print("  " + format_for_display(entry, verbosity=VERBOSITY_BRIEF))
         else:
-            print(format_for_disk(matching[0], brief=args.brief))
+            verbosity = VERBOSITY_NORMAL if args.brief else VERBOSITY_FULL
+            print(format_for_display(matching[0], verbosity=verbosity))
 
     def create_entry_for_editing(self, original_entry: Entry) -> str:
         """
@@ -408,23 +409,6 @@ def split_term(term: str) -> Tuple[str, str]:
         return ("", term)
 
 
-def format_for_display(entry: Entry) -> str:
-    """
-    Returns the short string representation of the entry.
-
-    This is the form that is shown to users for search results.
-    """
-    assert isinstance(entry["title"], str)
-    assert isinstance(entry["filename"], str)
-    if "creator" in entry:
-        assert isinstance(entry["creator"], str)
-        return (
-            entry["title"] + " (" + entry["creator"] + ") [" + entry["filename"] + "]"
-        )
-    else:
-        return entry["title"] + " [" + entry["filename"] + "]"
-
-
 class FieldDef:
     def __init__(
         self,
@@ -546,6 +530,68 @@ FIELDS: Dict[str, FieldDef] = OrderedDict(
 
 MAXIMUM_LENGTH = 80
 INDENT = "  "
+VERBOSITY_BRIEF = 0
+VERBOSITY_NORMAL = 1
+VERBOSITY_FULL = 2
+
+
+def format_for_display(entry: Entry, *, verbosity: int) -> str:
+    """
+    Returns a string representation of the entry for display to the user.
+    """
+    if verbosity == VERBOSITY_BRIEF:
+        assert isinstance(entry["title"], str)
+        assert isinstance(entry["filename"], str)
+        if "creator" in entry:
+            assert isinstance(entry["creator"], str)
+            return (
+                entry["title"]
+                + " ("
+                + entry["creator"]
+                + ") ["
+                + entry["filename"]
+                + "]"
+            )
+        else:
+            return entry["title"] + " [" + entry["filename"] + "]"
+    else:
+        lines = []
+        for field, fielddef in FIELDS.items():
+            if field not in entry:
+                continue
+
+            value = entry[field]
+            if not value:
+                continue
+
+            if fielddef.longform:
+                if verbosity == VERBOSITY_NORMAL:
+                    lines.append(single_line_field(field, "<hidden>"))
+                else:
+                    lines.extend(
+                        list(multi_line_field(field, value, alphabetical=False))
+                    )
+                    lines.append("")
+            elif (
+                fielddef.multiple
+                or "\n" in value
+                or len(single_line_field(field, value)) > MAXIMUM_LENGTH
+            ):
+                lines.extend(
+                    list(
+                        multi_line_field(
+                            field, value, alphabetical=fielddef.alphabetical
+                        )
+                    )
+                )
+                lines.append("")
+            else:
+                lines.append(single_line_field(field, value))
+
+        if lines and not lines[-1]:
+            lines.pop()
+
+        return "\n".join(lines)
 
 
 def format_for_editing(entry: Entry) -> str:
@@ -582,11 +628,9 @@ def format_for_editing(entry: Entry) -> str:
     return "\n".join(lines)
 
 
-def format_for_disk(entry: Entry, *, brief: bool = False) -> str:
+def format_for_disk(entry: Entry) -> str:
     """
     Returns the string representation of the entry to be written to disk.
-
-    If `brief` is True, then the values of fields marked `longform` are not printed.
     """
     lines = []
     for field, fielddef in FIELDS.items():
@@ -598,19 +642,22 @@ def format_for_disk(entry: Entry, *, brief: bool = False) -> str:
             continue
 
         if fielddef.longform:
-            if brief:
-                lines.append(single_line_field(field, "<hidden>"))
-            else:
-                lines.extend(list(multi_line_field(field, value, alphabetical=False)))
-                lines.append("")
-        elif (
-            fielddef.multiple
-            or "\n" in value
-            or len(single_line_field(field, value)) > MAXIMUM_LENGTH
-        ):
-            lines.extend(
-                list(multi_line_field(field, value, alphabetical=fielddef.alphabetical))
-            )
+            assert isinstance(value, str)
+
+            lines.append(field + ":")
+            paragraphs = value.splitlines()
+            for i, paragraph in enumerate(paragraphs):
+                if i != 0:
+                    lines.append("")
+
+                lines.append(INDENT + paragraph)
+            lines.append("")
+        elif fielddef.multiple:
+            lines.append(field + ":")
+            value = map(str, value)  # type: ignore
+            for v in sorted(value) if fielddef.alphabetical else value:  # type: ignore
+                assert isinstance(v, str)
+                lines.append(INDENT + v)
             lines.append("")
         else:
             lines.append(single_line_field(field, value))
@@ -746,7 +793,7 @@ def alphabetical_key(entry):
     """
     Key for sort functions to sort entries alphabetically.
     """
-    name = format_for_display(entry)
+    name = format_for_display(entry, verbosity=VERBOSITY_BRIEF)
     if name.startswith("The "):
         return name[4:]
     elif name.startswith(("Le ", "La ")):
