@@ -18,16 +18,53 @@ import readline  # noqa: F401
 import subprocess
 import sys
 import textwrap
-from collections import defaultdict, OrderedDict
-from typing import Dict, IO, Iterator, List, Optional, Tuple, Union
+from collections import defaultdict
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 
 OEUVRE_DIRECTORY = "/home/iafisher/files/oeuvre"
 
 
-# Type definitions
-Field = Union[List[str], List["KeywordField"], str]
-Entry = Dict[str, Field]
+class Entry:
+    def __init__(
+        self,
+        *,
+        title: str,
+        type: str,
+        filename: Optional[str] = None,
+        creator: Optional[str] = None,
+        year: Optional[int] = None,
+        language: Optional[str] = None,
+        plot_summary: Optional[str] = None,
+        characters: Optional[List["KeywordField"]] = None,
+        locations: Optional[List["KeywordField"]] = None,
+        topics: Optional[List["KeywordField"]] = None,
+        settings: Optional[List["KeywordField"]] = None,
+        technical: Optional[List["KeywordField"]] = None,
+        external: Optional[List["KeywordField"]] = None,
+        quotes: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        self.title = title
+        self.type = type
+        self.filename = filename
+        self.creator = creator
+        self.year = year
+        self.language = language
+        self.plot_summary = plot_summary
+        self.characters = characters or []
+        self.locations = locations or []
+        self.topics = topics or []
+        self.settings = settings or []
+        self.technical = technical or []
+        self.external = external or []
+        self.quotes = quotes
+        self.notes = notes
+
+    def __str__(self) -> str:
+        creator_suffix = f" ({self.creator})" if self.creator else ""
+        filename_suffix = f" [{self.filename}]" if self.filename else ""
+        return self.title + creator_suffix + filename_suffix
 
 
 class Application:
@@ -50,7 +87,6 @@ class Application:
 
         parser_list = subparsers.add_parser("keywords")
         parser_list.add_argument("--sorted", action="store_true")
-        parser_list.add_argument("field", nargs="?")
         parser_list.set_defaults(func=self.main_keywords)
 
         parser_new = subparsers.add_parser("new")
@@ -85,41 +121,41 @@ class Application:
         if not matching:
             error("no matching entries")
 
-        editpaths = []
-        for e in matching:
-            editpath = self.create_entry_for_editing(e)
-            editpaths.append(editpath)
-
+        paths = [
+            os.path.join(self.directory, e.filename) for e in matching  # type: ignore
+        ]
         while True:
             editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor] + editpaths)
+            r = subprocess.run([editor] + paths)
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
             success = True
-            for original_entry, editpath in zip(matching, editpaths):
+            for old_entry in matching:
+                assert isinstance(old_entry.filename, str)
+                path = os.path.join(self.directory, old_entry.filename)
+                with open(path, "r", encoding="utf8") as f:
+                    text = f.read()
+
                 try:
-                    with open(editpath, "r", encoding="utf8") as f:
-                        entry = parse_entry(self.directory, f)
+                    entry = parse_entry(text)
                 except OeuvreError as e:
                     success = False
-                    error(str(e), lineno=e.lineno, path=editpath, fatal=False)
+                    e.path = path
+                    error(str(e), fatal=False)
                     if not confirm("Try again? "):
+                        # TODO(2020-07-02): Need to write back old entries.
                         sys.exit(1)
                 else:
                     # Call `format_for_disk` before opening the file for writing, so
                     # that if there's an error the file is not wiped out.
                     text = format_for_disk(entry)
-                    assert isinstance(original_entry["filename"], str)
-                    original_full_path = os.path.join(
-                        self.directory, original_entry["filename"]
-                    )
-                    with open(original_full_path, "w", encoding="utf8") as f:
+                    with open(path, "w", encoding="utf8") as f:
                         f.write(text)
                         f.write("\n")
 
                     # Only print the entry if only one was opened for editing.
-                    if len(editpaths) == 1:
+                    if len(matching) == 1:
                         print(text)
 
             if success:
@@ -129,35 +165,11 @@ class Application:
         """
         Lists all keywords from the database.
         """
-        if args.field:
-            if args.field not in FIELDS:
-                error(f"{args.field} is not a valid field")
-
-            if not FIELDS[args.field].keyword_style:
-                error(f"{args.field} is not a keyword field")
-
         counter: defaultdict = defaultdict(int)
         entries = self.read_entries()
         for entry in entries:
-            for field in entry:
-                if field not in FIELDS:
-                    continue
-
-                if field == "characters":
-                    continue
-
-                if not FIELDS[field].keyword_style:
-                    continue
-
-                if args.field and field != args.field:
-                    continue
-
-                for keyword in entry[field]:
-                    assert isinstance(keyword, KeywordField)
-                    name = (
-                        keyword.keyword if args.field else field + ":" + keyword.keyword
-                    )
-                    counter[name] += 1
+            for keyword in entry.topics:
+                counter[keyword.keyword] += 1
 
         # Sort by count and then by name if --sorted flag was present. Otherwise, just
         # by name.
@@ -169,19 +181,32 @@ class Application:
         """
         Creates a new entry.
         """
-        editpath = self.create_entry_for_editing({"filename": "new_entry.txt"})
+        path = os.path.join(self.directory, args.path)
+        if os.path.exists(path):
+            error(f"{path} already exists.")
+
+        blank_entry = Entry(title="", type="")
+        text = format_for_disk(blank_entry)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.write("\n")
+
         while True:
             editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor, editpath])
+            r = subprocess.run([editor, path])
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
+            with open(path, "r", encoding="utf8") as f:
+                text = f.read()
+
             try:
-                with open(editpath, "r", encoding="utf8") as f:
-                    entry = parse_entry(self.directory, f)
+                entry = parse_entry(text)
             except OeuvreError as e:
-                error(str(e), lineno=e.lineno, path=editpath, fatal=False)
+                e.path = path
+                error(str(e), fatal=False)
                 if not confirm("Try again? "):
+                    os.remove(path)
                     sys.exit(1)
 
                 continue
@@ -189,8 +214,7 @@ class Application:
                 # Call `format_for_disk` before opening the file for writing, so
                 # that if there's an error the file is not wiped out.
                 text = format_for_disk(entry)
-                original_full_path = os.path.join(self.directory, args.path)
-                with open(original_full_path, "w", encoding="utf8") as f:
+                with open(path, "w", encoding="utf8") as f:
                     f.write(text)
                     f.write("\n")
 
@@ -206,8 +230,10 @@ class Application:
             sys.exit(1)
 
         for entry in self.read_entries():
-            assert isinstance(entry["filename"], str)
-            path = os.path.join(self.directory, entry["filename"])
+            if not entry.filename:
+                continue
+
+            path = os.path.join(self.directory, entry.filename)
             text = format_for_disk(entry)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -220,7 +246,7 @@ class Application:
         locdb = {} if args.strict_location else self.locdb
         matching = self.read_matching_entries(args.terms, locdb=locdb)
         for entry in sorted(matching, key=alphabetical_key):
-            print(format_for_display(entry, verbosity=VERBOSITY_BRIEF))
+            print(str(entry))
 
     def main_show(self, args: argparse.Namespace) -> None:
         """
@@ -232,26 +258,10 @@ class Application:
         elif len(matching) > 1:
             print("Multiple matching entries:")
             for entry in sorted(matching, key=alphabetical_key):
-                print("  " + format_for_display(entry, verbosity=VERBOSITY_BRIEF))
+                print("  " + str(entry))
         else:
-            verbosity = VERBOSITY_NORMAL if args.brief else VERBOSITY_FULL
+            verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
             print(format_for_display(matching[0], verbosity=verbosity))
-
-    def create_entry_for_editing(self, original_entry: Entry) -> str:
-        """
-        Creates a temporary file for editing the given entry and returns the file path.
-        """
-        editdir = os.path.join(self.directory, "editing")
-        if not os.path.exists(editdir):
-            os.mkdir(editdir)
-
-        editpath = os.path.join(editdir, original_entry["filename"].replace("/", "__"))
-        text = format_for_editing(original_entry)
-        with open(editpath, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.write("\n")
-
-        return editpath
 
     def read_matching_entries(
         self, search_terms: List[str], *, locdb: Dict[str, List[str]]
@@ -276,12 +286,17 @@ class Application:
                 continue
 
             with open(path, "r", encoding="utf8") as f:
-                try:
-                    entry = parse_entry(self.directory, f)
-                except OeuvreError as e:
-                    error(str(e), lineno=e.lineno, path=path)
+                text = f.read()
 
-                entries.append(entry)
+            try:
+                entry = parse_entry(text)
+            except OeuvreError as e:
+                e.path = path
+                error(str(e))
+
+            entry.filename = path[len(self.directory) + 1 :]
+            entries.append(entry)
+
         return entries
 
 
@@ -338,29 +353,34 @@ def match_one(
     else:
         pred = lambda v: term.lower() == v.lower()
 
-    # TODO(2020-05-17): Handle location matching more intelligently.
     if search_field:
         fields_to_match = [search_field]
     else:
         fields_to_match = [
-            field for field, fielddef in FIELDS.items() if fielddef.searchable
-        ] + ["filename"]
+            "filename",
+            "title",
+            "creator",
+            "characters",
+            "locations",
+            "topics",
+            "settings",
+            "technical",
+            "external",
+        ]
 
     for field in fields_to_match:
-        if field not in entry:
+        field_value = getattr(entry, field, None)
+        if not field_value:
             continue
 
-        field_value = entry[field]
         if search_field == "locations":
-            if match_location(field_value, term, locdb):  # type: ignore
+            if match_location(entry.locations, term, locdb):  # type: ignore
                 return True
         elif isinstance(field_value, list):
-            if any(
-                pred(v.keyword if isinstance(v, KeywordField) else v)
-                for v in field_value
-            ):
+            if any(pred(v.keyword) for v in field_value):
                 return True
         else:
+            assert isinstance(field_value, str)
             if pred(field_value):
                 return True
 
@@ -409,47 +429,13 @@ def split_term(term: str) -> Tuple[str, str]:
         return ("", term)
 
 
-class FieldDef:
-    def __init__(
-        self,
-        required=False,
-        multiple=False,
-        alphabetical=False,
-        searchable=False,
-        editable=True,
-        keyword_style=False,
-        choices=None,
-        longform=False,
-    ):
-        if required and not editable:
-            raise OeuvreError("required field must be editable")
-
-        if keyword_style and not multiple:
-            raise OeuvreError("multiple must be True if keyword_style is True")
-
-        if alphabetical and not multiple:
-            raise OeuvreError("multiple must be True if alphabetical is True")
-
-        if longform and multiple:
-            raise OeuvreError("multiple must not be True if longform is True")
-
-        self.required = required
-        self.multiple = multiple
-        self.alphabetical = alphabetical
-        self.searchable = searchable
-        self.editable = editable
-        self.keyword_style = keyword_style
-        self.choices = choices
-        self.longform = longform
-
-
 class KeywordField:
-    def __init__(self, keyword, description):
+    def __init__(self, keyword: str, description: Optional[str]) -> None:
         self.keyword = keyword
         self.description = description
 
     @classmethod
-    def from_string(cls, s):
+    def from_string(cls, s: str) -> "KeywordField":
         if ":" in s:
             keyword, description = s.split(":", maxsplit=1)
             keyword = keyword.rstrip()
@@ -460,340 +446,305 @@ class KeywordField:
 
         return cls(keyword, description)
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return bool(self.keyword or self.description)
 
-    def __repr__(self):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, KeywordField):
+            return False
+
+        return self.keyword == other.keyword and self.description == other.description
+
+    def __repr__(self) -> str:
         return f"KeywordField({self.keyword!r}, {self.description!r})"
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.description:
             return f"{self.keyword}: {self.description}"
         else:
             return self.keyword
 
 
-FIELDS: Dict[str, FieldDef] = OrderedDict(
-    [
-        ("title", FieldDef(required=True, searchable=True)),
-        ("creator", FieldDef(searchable=True)),
-        (
-            "type",
-            FieldDef(
-                required=True, choices={"book", "story", "film", "play", "television"}
-            ),
-        ),
-        ("year", FieldDef()),
-        ("language", FieldDef()),
-        ("plot-summary", FieldDef(longform=True)),
-        (
-            "characters",
-            FieldDef(
-                multiple=True, alphabetical=False, searchable=True, keyword_style=True
-            ),
-        ),
-        (
-            "locations",
-            FieldDef(
-                multiple=True, alphabetical=False, searchable=True, keyword_style=True
-            ),
-        ),
-        (
-            "topics",
-            FieldDef(
-                multiple=True, alphabetical=True, searchable=True, keyword_style=True
-            ),
-        ),
-        (
-            "settings",
-            FieldDef(
-                multiple=True, alphabetical=True, searchable=True, keyword_style=True
-            ),
-        ),
-        (
-            "technical",
-            FieldDef(
-                multiple=True, alphabetical=True, searchable=True, keyword_style=True
-            ),
-        ),
-        (
-            "external",
-            FieldDef(
-                multiple=True, alphabetical=True, searchable=True, keyword_style=True
-            ),
-        ),
-        ("quotes", FieldDef(longform=True)),
-        ("notes", FieldDef(longform=True)),
-    ]
-)
-
-
 MAXIMUM_LENGTH = 80
 INDENT = "  "
 VERBOSITY_BRIEF = 0
-VERBOSITY_NORMAL = 1
-VERBOSITY_FULL = 2
+VERBOSITY_FULL = 1
 
 
 def format_for_display(entry: Entry, *, verbosity: int) -> str:
     """
     Returns a string representation of the entry for display to the user.
     """
-    if verbosity == VERBOSITY_BRIEF:
-        assert isinstance(entry["title"], str)
-        assert isinstance(entry["filename"], str)
-        if "creator" in entry:
-            assert isinstance(entry["creator"], str)
-            return (
-                entry["title"]
-                + " ("
-                + entry["creator"]
-                + ") ["
-                + entry["filename"]
-                + "]"
-            )
-        else:
-            return entry["title"] + " [" + entry["filename"] + "]"
-    else:
-        lines = []
-        for field, fielddef in FIELDS.items():
-            if field not in entry:
-                continue
-
-            value = entry[field]
-            if not value:
-                continue
-
-            if fielddef.longform:
-                if verbosity == VERBOSITY_NORMAL:
-                    lines.append(single_line_field(field, "<hidden>"))
-                else:
-                    lines.extend(
-                        list(multi_line_field(field, value, alphabetical=False))
-                    )
-                    lines.append("")
-            elif (
-                fielddef.multiple
-                or "\n" in value
-                or len(single_line_field(field, value)) > MAXIMUM_LENGTH
-            ):
-                lines.extend(
-                    list(
-                        multi_line_field(
-                            field, value, alphabetical=fielddef.alphabetical
-                        )
-                    )
-                )
-                lines.append("")
-            else:
-                lines.append(single_line_field(field, value))
-
-        if lines and not lines[-1]:
-            lines.pop()
-
-        return "\n".join(lines)
-
-
-def format_for_editing(entry: Entry) -> str:
-    """
-    Returns the editable string representation of the entry.
-
-    As opposed to `format_for_disk`, blank fields are included and non-editable fields
-    are excluded.
-    """
-    lines = []
-    for field, fielddef in FIELDS.items():
-        if not fielddef.editable:
-            continue
-
-        value = entry.get(field, "")
-        if fielddef.longform:
-            lines.extend(list(multi_line_field(field, value, alphabetical=False)))
-            lines.append("")
-        elif (
-            fielddef.multiple
-            or "\n" in value
-            or len(single_line_field(field, value)) > MAXIMUM_LENGTH
-        ):
-            lines.extend(
-                list(multi_line_field(field, value, alphabetical=fielddef.alphabetical))
-            )
-            lines.append("")
-        else:
-            lines.append(single_line_field(field, value))
-
-    if lines and not lines[-1]:
-        lines.pop()
-
-    return "\n".join(lines)
+    lines = _format_entry(entry, verbosity=verbosity, display=True)
+    return "\n".join(list(lines)).rstrip("\n")
 
 
 def format_for_disk(entry: Entry) -> str:
     """
     Returns the string representation of the entry to be written to disk.
     """
-    lines = []
-    for field, fielddef in FIELDS.items():
-        if field not in entry:
-            continue
-
-        value = entry[field]
-        if not value:
-            continue
-
-        if fielddef.longform:
-            assert isinstance(value, str)
-
-            lines.append(field + ":")
-            paragraphs = value.splitlines()
-            for i, paragraph in enumerate(paragraphs):
-                if i != 0:
-                    lines.append("")
-
-                lines.append(INDENT + paragraph)
-            lines.append("")
-        elif fielddef.multiple:
-            lines.append(field + ":")
-            value = map(str, value)  # type: ignore
-            for v in sorted(value) if fielddef.alphabetical else value:  # type: ignore
-                assert isinstance(v, str)
-                lines.append(INDENT + v)
-            lines.append("")
-        else:
-            lines.append(single_line_field(field, value))
-
-    if lines and not lines[-1]:
-        lines.pop()
-
-    return "\n".join(lines)
+    lines = _format_entry(entry, verbosity=VERBOSITY_FULL, display=False)
+    return "\n".join(list(lines)).rstrip("\n")
 
 
-def single_line_field(field: str, value: Field) -> str:
+def _format_entry(entry: Entry, *, display: bool, verbosity: int) -> Iterable[str]:
+    yield from emit_field("title", entry.title, display=display)
+    yield from emit_field("creator", entry.creator, display=display)
+    yield from emit_field("type", entry.type, display=display)
+    yield from emit_field(
+        "year", str(entry.year) if entry.year is not None else None, display=display
+    )
+    yield from emit_field("language", entry.language, display=display)
+    yield from emit_longform_field(
+        "plot-summary", entry.plot_summary, display=display, verbosity=verbosity
+    )
+    yield from emit_list_field(
+        "characters", entry.characters, alphabetical=False, display=display
+    )
+    yield from emit_list_field(
+        "locations", entry.locations, alphabetical=False, display=display
+    )
+    yield from emit_list_field(
+        "topics", entry.topics, alphabetical=True, display=display
+    )
+    yield from emit_list_field(
+        "settings", entry.settings, alphabetical=True, display=display
+    )
+    yield from emit_list_field(
+        "technical", entry.technical, alphabetical=True, display=display
+    )
+    yield from emit_list_field(
+        "external", entry.external, alphabetical=True, display=display
+    )
+    yield from emit_longform_field(
+        "quotes", entry.quotes, display=display, verbosity=verbosity
+    )
+    yield from emit_longform_field(
+        "notes", entry.notes, display=display, verbosity=verbosity
+    )
+
+
+def emit_field(field: str, value: Optional[str], *, display: bool) -> Iterable[str]:
     """
-    Returns the field and value as a single line.
+    Yields the formatted lines for a regular field.
     """
-    return field + ": " + str(value)
-
-
-def multi_line_field(
-    field: str, value: Field, *, alphabetical: bool = False
-) -> Iterator[str]:
-    """
-    Returns the field and value as multiple indented lines.
-    """
-    if isinstance(value, list):
-        yield field + ":"
-        values = [str(v) for v in value]
-        for v in sorted(values) if alphabetical else values:
-            yield from textwrap.wrap(
-                str(v),
-                width=MAXIMUM_LENGTH,
-                initial_indent=INDENT,
-                subsequent_indent=(INDENT * 2),
-            )
+    if value:
+        yield f"{field}: {value}"
     else:
-        yield field + ":"
+        if display:
+            return
+        else:
+            yield field + ":"
 
-        paragraphs = value.splitlines()
-        for i, paragraph in enumerate(paragraphs):
-            if i != 0:
-                yield ""
 
+def emit_longform_field(
+    field: str, value: Optional[str], *, display: bool, verbosity: int
+) -> Iterable[str]:
+    """
+    Yields the formatted lines for a longform field.
+    """
+    if not value:
+        if not display:
+            yield field + ":"
+            yield ""
+        return
+
+    if verbosity == VERBOSITY_BRIEF:
+        yield f"{field}: <hidden>"
+        return
+
+    yield field + ":"
+    for i, paragraph in enumerate(value.splitlines()):
+        if i != 0:
+            yield ""
+
+        if display:
             yield from textwrap.wrap(
                 paragraph,
                 width=MAXIMUM_LENGTH,
                 initial_indent=INDENT,
                 subsequent_indent=INDENT,
             )
+        else:
+            yield INDENT + paragraph
+
+    yield ""
 
 
-def parse_entry(directory: str, f: IO[str]) -> Entry:
+def emit_list_field(
+    field: str,
+    values: Union[List["KeywordField"], List[str]],
+    *,
+    alphabetical: bool,
+    display: bool,
+) -> Iterable[str]:
     """
-    Reads a database entry from a file object.
-
-    Raises an `OeuvreError` if the file is incorrectly formatted.
+    Yields the formatted lines for a list field.
     """
-    entry = OrderedDict()  # type: Entry
-    # The name of the current field that is being populated.
-    field = None
-    sep = " "
+    if not values:
+        if not display:
+            yield field + ":"
+            yield ""
+        return
 
-    for lineno, line in enumerate(f, start=1):
-        indented = line.startswith("  ")
-        double_indented = line.startswith("    ")
+    stringvalues: Iterable[str] = map(str, values)
+    if alphabetical:
+        stringvalues = sorted(stringvalues)
+
+    yield field + ":"
+    for value in stringvalues:
+        if display:
+            yield from textwrap.wrap(
+                value,
+                width=MAXIMUM_LENGTH,
+                initial_indent=INDENT,
+                subsequent_indent=(INDENT * 2),
+            )
+        else:
+            yield INDENT + value
+
+    yield ""
+
+
+def parse_entry(text: str) -> Entry:
+    """
+    Reads a database entry from a string.
+
+    Raises an `OeuvreError` if the entry is incorrectly formatted.
+    """
+    fields: Dict[str, Union[str, int, List["KeywordField"]]] = {}
+    lines = list(enumerate(text.splitlines(), start=1))
+    lines.reverse()
+
+    while lines:
+        lineno, line = lines[-1]
         line = line.strip()
         if not line:
-            sep = "\n"
+            lines.pop()
             continue
 
-        if double_indented and field is not None and FIELDS[field].keyword_style:
-            if not entry[field]:
-                raise OeuvreError("unexpected double indentation", lineno=lineno)
+        if ":" not in line:
+            raise OeuvreError("expected field definition", lineno=lineno)
 
-            # If doubly indented and the field is keyword-style, then the line belongs
-            # to the description of the previous keyword.
-            previous_value = entry[field][-1]
-            previous_value.description += " " + line
-        elif indented:
-            if field is None:
-                raise OeuvreError("indented text without a field", lineno=lineno)
+        field, value = line.split(":", maxsplit=1)
+        field = field.strip().replace("-", "_")
+        value = value.strip()
 
-            previous_value = entry[field]
-            if FIELDS[field].multiple:
-                if FIELDS[field].keyword_style:
-                    line = KeywordField.from_string(line)
+        if field in ("plot_summary", "quotes", "notes"):
+            if value:
+                raise OeuvreError("trailing content", lineno=lineno)
 
-                previous_value.append(line)
-            else:
-                entry[field] = previous_value + sep + line if previous_value else line
+            lines.pop()
+            fields[field] = parse_longform_field(lines)
+        elif field in (
+            "characters",
+            "locations",
+            "topics",
+            "settings",
+            "technical",
+            "external",
+        ):
+            if value:
+                raise OeuvreError("trailing content", lineno=lineno)
+
+            lines.pop()
+            fields[field] = parse_list_field(lines)
+        elif field in ("title", "type", "creator", "language", "year"):
+            lines.pop()
+            fields[field] = validate_field(field, value, lineno=lineno)
         else:
-            if ":" not in line:
-                raise OeuvreError("un-indented line without a colon", lineno=lineno)
+            raise OeuvreError(f"unknown field {field!r}", lineno=lineno)
 
-            field, value = line.split(":", maxsplit=1)
-            field = field.strip()
-            value = value.strip()
-
-            if field not in FIELDS:
-                raise OeuvreError(f"unknown field {field!r}", lineno=lineno)
-
-            if FIELDS[field].multiple:
-                if FIELDS[field].keyword_style:
-                    value = KeywordField.from_string(value)
-
-                entry[field] = [value] if value else []
-            else:
-                entry[field] = value
-
-        sep = " "
-
-    validate_entry(entry)
-
-    entry["filename"] = f.name.replace(directory + "/", "")
-    return entry
+    return Entry(**fields)  # type: ignore
 
 
-def validate_entry(entry):
+def parse_longform_field(lines: List[Tuple[int, str]]) -> str:
     """
-    Checks if the entry is valid.
+    Parses the value of a longform field.
+
+    `lines` should be a list of (line number, line) pairs in reverse order. This
+    function will remove all lines from the end of `lines` that it uses.
     """
-    for field, fielddef in FIELDS.items():
-        if fielddef.required and (field not in entry or not entry[field]):
-            raise OeuvreError(f"missing required field {field!r}")
-        elif fielddef.choices:
-            if field not in entry or not entry[field]:
-                continue
+    paragraphs = []
+    while lines:
+        lineno, line = lines[-1]
 
-            if entry[field] not in fielddef.choices:
-                choices = ", ".join(fielddef.choices)
-                raise OeuvreError(f"value of field {field!r} must be one of: {choices}")
+        if not line:
+            lines.pop()
+            continue
+
+        if not line.startswith(INDENT):
+            break
+
+        lines.pop()
+        line = line.strip()
+        paragraphs.append(line)
+
+    return "\n".join(paragraphs)
 
 
-def alphabetical_key(entry):
+def parse_list_field(lines: List[Tuple[int, str]]) -> List["KeywordField"]:
+    """
+    Parses the value of a list field.
+
+    `lines` should be a list of (line number, line) pairs in reverse order. This
+    function will remove all lines from the end of `lines` that it uses.
+    """
+    values = []
+    while lines:
+        lineno, line = lines[-1]
+
+        if not line or not line.startswith(INDENT):
+            break
+
+        description: Optional[str]
+        if ":" in line:
+            keyword, description = line.split(":", maxsplit=1)
+            keyword = keyword.strip()
+            description = description.strip()
+        else:
+            keyword = line.strip()
+            description = None
+
+        lines.pop()
+        values.append(KeywordField(keyword, description))
+
+    return values
+
+
+REQUIRED_FIELDS = {"title", "type"}
+TYPE_CHOICES = {"book", "film", "television", "play", "story"}
+
+
+def validate_field(field: str, value: str, *, lineno: int) -> Union[str, int]:
+    """
+    Raises an OeuvreError if the field's value is not valid.
+
+    Returns the value of the field, possibly transformed (e.g., converted from a string
+    to an integer).
+    """
+    if field in REQUIRED_FIELDS and not value:
+        raise OeuvreError(f"{field!r} field is required", lineno=lineno)
+
+    if field == "type" and value not in TYPE_CHOICES:
+        raise OeuvreError(
+            f"'type' must be one of: {', '.join(TYPE_CHOICES)}", lineno=lineno
+        )
+
+    if field == "year" and value:
+        if not value.isdigit():
+            raise OeuvreError("'year' must be an integer", lineno=lineno)
+
+        return int(value)
+
+    return value
+
+
+def alphabetical_key(entry: Entry) -> str:
     """
     Key for sort functions to sort entries alphabetically.
     """
-    name = format_for_display(entry, verbosity=VERBOSITY_BRIEF)
+    name = str(entry)
     if name.startswith("The "):
         return name[4:]
     elif name.startswith(("Le ", "La ")):
@@ -802,27 +753,8 @@ def alphabetical_key(entry):
         return name
 
 
-def error(
-    message: str,
-    *,
-    lineno: Optional[int] = None,
-    path: Optional[str] = None,
-    fatal: bool = True,
-) -> None:
-    location: Optional[str]
-    if path is not None:
-        if lineno is not None:
-            location = f"{path}, line {lineno}"
-        else:
-            location = path
-    else:
-        location = None
-
-    if location:
-        print(f"error: {message} ({location})", file=sys.stderr)
-    else:
-        print(f"error: {message}", file=sys.stderr)
-
+def error(message: str, *, fatal: bool = True) -> None:
+    print(f"error: {message}", file=sys.stderr)
     if fatal:
         sys.exit(1)
 
@@ -838,6 +770,17 @@ class OeuvreError(Exception):
         super().__init__(*args, **kwargs)
         self.lineno = lineno
         self.path = path
+
+    def __str__(self):
+        if self.path is not None:
+            if self.lineno is not None:
+                location_suffix = f" ({self.path}, line {self.lineno})"
+            else:
+                location_suffix = f" ({self.path})"
+        else:
+            location_suffix = ""
+
+        return super().__str__() + location_suffix
 
 
 if __name__ == "__main__":
