@@ -1,11 +1,23 @@
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from io import StringIO
 from unittest.mock import patch
 
 from oeuvre import Application, KeywordField, parse_list_field, parse_longform_field
+
+
+class FakeStdout(StringIO):
+    # Make sure we are using the real stdout and not the one that we patched.
+    original_stdout = sys.stdout
+
+    def fileno(self):
+        # oeuvre calls sys.stdout.fileno() to check if standard output is a terminal or
+        # not (and thus whether it should use colored output), so we have to define this
+        # method on the StringIO class we are using to patch sys.stdout.
+        return self.original_stdout.fileno()
 
 
 class OeuvreTests(unittest.TestCase):
@@ -16,28 +28,28 @@ class OeuvreTests(unittest.TestCase):
         shutil.copytree("test_database", d)
         cls.app = Application(d)
 
-    @patch("sys.stdout", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=FakeStdout)
     def test_show_command(self, stdout):
         self.app.main(["show", "libra.txt"])
         self.assertEqual(stdout.getvalue(), LIBRA_FULL)
 
-    @patch("sys.stdout", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=FakeStdout)
     def test_show_command_with_brief_flag(self, stdout):
         self.app.main(["show", "--brief", "libra.txt"])
         self.assertEqual(stdout.getvalue(), LIBRA_BRIEF)
 
-    @patch("sys.stdout", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=FakeStdout)
     def test_search_command_with_bare_keyword(self, stdout):
-        self.app.main(["search", "DeLillo", "--detailed"])
+        self.app.main(["--no-color", "search", "DeLillo", "--detailed"])
         self.assertEqual(
             stdout.getvalue(),
             "Libra (Don DeLillo) [libra.txt]\n"
             + "  creator: matched text (Don DeLillo)\n",
         )
 
-    @patch("sys.stdout", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=FakeStdout)
     def test_search_command_with_scoped_keyword(self, stdout):
-        self.app.main(["search", "type:book", "--detailed"])
+        self.app.main(["--no-color", "search", "type:book", "--detailed"])
         self.assertEqual(
             stdout.getvalue(),
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"

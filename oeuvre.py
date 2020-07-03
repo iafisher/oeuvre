@@ -74,6 +74,15 @@ class Entry:
         """
         return self._format(verbosity=verbosity, display=True)
 
+    def format_title_for_display(self, *, color: bool) -> str:
+        """
+        Returns a string representation of the entry's title.
+        """
+        title = blue(self.title) if color else self.title
+        creator_suffix = f" ({self.creator})" if self.creator else ""
+        filename_suffix = f" [{self.filename}]" if self.filename else ""
+        return title + creator_suffix + filename_suffix
+
     def format_for_disk(self) -> str:
         """
         Returns the string representation of the entry to be written to disk.
@@ -102,9 +111,7 @@ class Entry:
         return builder.build()
 
     def __str__(self) -> str:
-        creator_suffix = f" ({self.creator})" if self.creator else ""
-        filename_suffix = f" [{self.filename}]" if self.filename else ""
-        return self.title + creator_suffix + filename_suffix
+        return self.format_title_for_display(color=False)
 
 
 class Application:
@@ -129,6 +136,7 @@ class Application:
         Runs the program with the given command-line arguments.
         """
         parser = argparse.ArgumentParser()
+        parser.add_argument("--no-color", action="store_true")
         subparsers = parser.add_subparsers()
 
         parser_edit = subparsers.add_parser("edit")
@@ -159,6 +167,14 @@ class Application:
         parser_show.set_defaults(func=self.main_show)
 
         parsed_args = parser.parse_args(args)
+
+        if (
+            parsed_args.no_color
+            or not os.isatty(sys.stdout.fileno())
+            or not os.isatty(sys.stderr.fileno())
+        ):
+            turn_off_colors()
+
         if hasattr(parsed_args, "func"):
             parsed_args.func(parsed_args)
         else:
@@ -298,7 +314,7 @@ class Application:
         locdb = {} if args.strict_location else self.locdb
         matching = self.read_matching_entries(args.terms, locdb=locdb)
         for entry, matches in sorted(matching, key=alphabetical_key):
-            print(str(entry))
+            print(entry.format_title_for_display(color=True))
             if args.detailed:
                 for match in matches:
                     print("  " + match)
@@ -767,6 +783,38 @@ def confirm(prompt: str) -> bool:
             return True
         elif yesno.startswith("n"):
             return False
+
+
+def turn_off_colors() -> None:
+    """Turns off colored output globally for the program."""
+    global _NO_COLOR
+    _NO_COLOR = True
+
+
+def red(text: str) -> str:
+    """Returns a string that will display as red using ANSI color codes."""
+    return _colored(text, _COLOR_RED)
+
+
+def blue(text: str) -> str:
+    """Returns a string that will display as blue using ANSI color codes."""
+    return _colored(text, _COLOR_BLUE)
+
+
+def green(text: str) -> str:
+    """Returns a string that will display as green using ANSI color codes."""
+    return _colored(text, _COLOR_GREEN)
+
+
+def _colored(text: str, color: str) -> str:
+    return f"\033[{color}m{text}\033[{_COLOR_RESET}m" if not _NO_COLOR else text
+
+
+_COLOR_RED = "91"
+_COLOR_BLUE = "94"
+_COLOR_GREEN = "92"
+_COLOR_RESET = "0"
+_NO_COLOR = False
 
 
 def error(message: str, *, fatal: bool = True) -> None:
