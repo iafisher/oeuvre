@@ -321,11 +321,7 @@ class Application:
         Returns a list of all entries in the database that match the search terms.
         """
         entries = self.read_entries()
-        return [
-            entry
-            for entry in entries
-            if match(entry, search_terms, partial=True, locdb=locdb)
-        ]
+        return [entry for entry in entries if match(entry, search_terms, locdb=locdb)]
 
     def read_entries(self) -> List[Entry]:
         """
@@ -352,36 +348,23 @@ class Application:
 
 
 def match(
-    entry: Entry, search_terms: List[str], *, partial: bool, locdb: Dict[str, List[str]]
+    entry: Entry, search_terms: List[str], *, locdb: Dict[str, List[str]]
 ) -> bool:
     """
     Returns True if the entry matches the search terms.
 
     Search terms are joined by an implicit AND operator.
-
-    If `partial` is True, then the search term can match partially, e.g. `war` can match
-    `civil-war`.
     """
     return all(
-        match_one(entry, search_term, partial=partial, locdb=locdb)
-        for search_term in search_terms
+        match_one(entry, search_term, locdb=locdb) for search_term in search_terms
     )
 
 
-def match_one(
-    entry: Entry, search_term: str, *, partial: bool, locdb: Dict[str, List[str]]
-) -> bool:
+def match_one(entry: Entry, search_term: str, *, locdb: Dict[str, List[str]]) -> bool:
     """
     Returns True if the entry matches the single search term.
-
-    See `match` for meaning of `partial` argument.
     """
     search_field, term = split_term(search_term)
-
-    if partial:
-        pred = lambda v: term.lower() in v.lower()
-    else:
-        pred = lambda v: term.lower() == v.lower()
 
     if search_field:
         fields_to_match = [search_field]
@@ -398,6 +381,7 @@ def match_one(
             "external",
         ]
 
+    pred = lambda v: term.lower() in v.lower()
     for field in fields_to_match:
         field_value = getattr(entry, field, None)
         if not field_value:
