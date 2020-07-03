@@ -58,6 +58,9 @@ class Application:
         parser_new.add_argument("path")
         parser_new.set_defaults(func=self.main_new)
 
+        parser_reformat = subparsers.add_parser("reformat")
+        parser_reformat.set_defaults(func=self.main_reformat)
+
         parser_search = subparsers.add_parser("search")
         parser_search.add_argument("terms", nargs="*")
         parser_search.add_argument("--strict-location", action="store_true")
@@ -206,6 +209,21 @@ class Application:
                 print(text)
 
             break
+
+    def main_reformat(self, args: argparse.Namespace) -> None:
+        """
+        Reformats all database entries.
+        """
+        if not confirm("Are you sure you want to reformat every entry? "):
+            sys.exit(1)
+
+        for entry in read_entries(self.directory):
+            assert isinstance(entry["filename"], str)
+            path = os.path.join(self.directory, entry["filename"])
+            text = format_for_disk(entry)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.write("\n")
 
     def main_search(self, args: argparse.Namespace) -> None:
         """
