@@ -149,6 +149,7 @@ class Application:
 
         parser_search = subparsers.add_parser("search")
         parser_search.add_argument("terms", nargs="*")
+        parser_search.add_argument("--detailed", action="store_true")
         parser_search.add_argument("--strict-location", action="store_true")
         parser_search.set_defaults(func=self.main_search)
 
@@ -298,8 +299,9 @@ class Application:
         matching = self.read_matching_entries(args.terms, locdb=locdb)
         for entry, matches in sorted(matching, key=alphabetical_key):
             print(str(entry))
-            for match in matches:
-                print("  " + match)
+            if args.detailed:
+                for match in matches:
+                    print("  " + match)
 
     def main_show(self, args: argparse.Namespace) -> None:
         """

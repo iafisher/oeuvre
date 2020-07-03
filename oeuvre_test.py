@@ -28,7 +28,7 @@ class OeuvreTests(unittest.TestCase):
 
     @patch("sys.stdout", new_callable=StringIO)
     def test_search_command_with_bare_keyword(self, stdout):
-        self.app.main(["search", "DeLillo"])
+        self.app.main(["search", "DeLillo", "--detailed"])
         self.assertEqual(
             stdout.getvalue(),
             "Libra (Don DeLillo) [libra.txt]\n"
@@ -37,7 +37,7 @@ class OeuvreTests(unittest.TestCase):
 
     @patch("sys.stdout", new_callable=StringIO)
     def test_search_command_with_scoped_keyword(self, stdout):
-        self.app.main(["search", "type:book"])
+        self.app.main(["search", "type:book", "--detailed"])
         self.assertEqual(
             stdout.getvalue(),
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
