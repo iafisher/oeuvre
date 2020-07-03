@@ -29,7 +29,11 @@ class OeuvreTests(unittest.TestCase):
     @patch("sys.stdout", new_callable=StringIO)
     def test_search_command_with_bare_keyword(self, stdout):
         self.app.main(["search", "DeLillo"])
-        self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+        self.assertEqual(
+            stdout.getvalue(),
+            "Libra (Don DeLillo) [libra.txt]\n"
+            + "  creator: matched text (Don DeLillo)\n",
+        )
 
     @patch("sys.stdout", new_callable=StringIO)
     def test_search_command_with_scoped_keyword(self, stdout):
@@ -37,7 +41,9 @@ class OeuvreTests(unittest.TestCase):
         self.assertEqual(
             stdout.getvalue(),
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
-            + "Libra (Don DeLillo) [libra.txt]\n",
+            + "  type: matched text (book)\n"
+            + "Libra (Don DeLillo) [libra.txt]\n"
+            + "  type: matched text (book)\n",
         )
 
     def test_parse_longform_field(self):

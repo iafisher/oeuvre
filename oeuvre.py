@@ -168,7 +168,7 @@ class Application:
         Opens the entry for editing and formats it before saving.
         """
         locdb = {} if args.strict_location else self.locdb
-        matching = self.read_matching_entries(args.terms, locdb=locdb)
+        matching = [e for e, _ in self.read_matching_entries(args.terms, locdb=locdb)]
         if not matching:
             error("no matching entries")
 
@@ -296,8 +296,10 @@ class Application:
         """
         locdb = {} if args.strict_location else self.locdb
         matching = self.read_matching_entries(args.terms, locdb=locdb)
-        for entry in sorted(matching, key=alphabetical_key):
+        for entry, matches in sorted(matching, key=alphabetical_key):
             print(str(entry))
+            for match in matches:
+                print("  " + match)
 
     def main_show(self, args: argparse.Namespace) -> None:
         """
@@ -308,20 +310,27 @@ class Application:
             print("No matching entries.")
         elif len(matching) > 1:
             print("Multiple matching entries:")
-            for entry in sorted(matching, key=alphabetical_key):
+            for entry, _ in sorted(matching, key=alphabetical_key):
                 print("  " + str(entry))
         else:
             verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
-            print(matching[0].format_for_display(verbosity=verbosity))
+            print(matching[0][0].format_for_display(verbosity=verbosity))
 
     def read_matching_entries(
         self, search_terms: List[str], *, locdb: Dict[str, List[str]]
-    ) -> List[Entry]:
+    ) -> List[Tuple[Entry, List[str]]]:
         """
         Returns a list of all entries in the database that match the search terms.
+
+        Each element of the returned list is a pair (entry, matches).
         """
         entries = self.read_entries()
-        return [entry for entry in entries if match(entry, search_terms, locdb=locdb)]
+        ret = []
+        for entry in entries:
+            matches = match(entry, search_terms, locdb=locdb)
+            if matches:
+                ret.append((entry, matches))
+        return ret
 
     def read_entries(self) -> List[Entry]:
         """
@@ -349,73 +358,73 @@ class Application:
 
 def match(
     entry: Entry, search_terms: List[str], *, locdb: Dict[str, List[str]]
-) -> bool:
+) -> List[str]:
     """
-    Returns True if the entry matches the search terms.
+    Returns a list of matches.
+
+    Each match is a string with a description of the match that is meant to be displayed
+    to the user.
+
+    If the list is empty, then the entry doesn't match the search terms.
 
     Search terms are joined by an implicit AND operator.
     """
-    return all(
-        match_one(entry, search_term, locdb=locdb) for search_term in search_terms
-    )
-
-
-def match_one(entry: Entry, search_term: str, *, locdb: Dict[str, List[str]]) -> bool:
-    """
-    Returns True if the entry matches the single search term.
-    """
-    search_field, term = split_term(search_term)
-
-    if search_field:
-        fields_to_match = [search_field]
-    else:
-        fields_to_match = [
-            "filename",
-            "title",
-            "creator",
-            "characters",
-            "locations",
-            "topics",
-            "settings",
-            "technical",
-            "external",
-        ]
-
-    pred = lambda v: term.lower() in v.lower()
-    for field in fields_to_match:
-        field_value = getattr(entry, field, None)
-        if not field_value:
-            continue
-
-        if search_field == "locations":
-            if match_location(entry.locations, term, locdb):  # type: ignore
-                return True
-        elif isinstance(field_value, list):
-            if any(pred(v.keyword) for v in field_value):
-                return True
+    matches = []
+    for search_term in search_terms:
+        search_field, term = split_term(search_term)
+        if search_field:
+            matches.extend(
+                match_field(search_field, getattr(entry, search_field), term)
+            )
         else:
-            assert isinstance(field_value, str)
-            if pred(field_value):
-                return True
+            matches = []
+            matches.extend(match_field("filename", entry.filename, search_term))
+            matches.extend(match_field("title", entry.title, search_term))
+            matches.extend(match_field("creator", entry.creator, search_term))
+            matches.extend(match_field("characters", entry.characters, search_term))
+            matches.extend(match_location(entry.locations, search_term, locdb))
+            matches.extend(match_field("topics", entry.topics, search_term))
+            matches.extend(match_field("settings", entry.settings, search_term))
+            matches.extend(match_field("technical", entry.technical, search_term))
+            matches.extend(match_field("external", entry.external, search_term))
 
-    return False
+    return matches
+
+
+def match_field(
+    field: str, value: Union[Optional[str], List["KeywordField"]], search_term: str
+) -> List[str]:
+    if not value:
+        return []
+
+    if isinstance(value, str):
+        if search_term.lower() in value.lower():
+            return [f"{field}: matched text ({value})"]
+        else:
+            return []
+    else:
+        matches = []
+        for subvalue in value:
+            if search_term.lower() in subvalue.keyword.lower():
+                matches.append(f"{field}: matched keyword ({subvalue.keyword})")
+        return matches
 
 
 def match_location(
     locations: List["KeywordField"], search_term: str, locdb: Dict[str, List[str]]
-) -> bool:
+) -> List[str]:
     """
     Returns True if any of the locations match the search term.
     """
     for location in locations:
         if location.keyword == search_term:
-            return True
+            return [f"location: matched ({location.keyword})"]
 
         enclosing = get_enclosing_locations(locdb, location.keyword)
         if search_term in enclosing:
-            return True
+            return [f"location: matched ({location.keyword})"]
 
-    return False
+    return []
 
 
 def get_enclosing_locations(locdb: Dict[str, List[str]], location: str) -> List[str]:
@@ -723,10 +732,11 @@ def validate_field(field: str, value: str, *, lineno: int) -> Union[str, int]:
     return value
 
 
-def alphabetical_key(entry: Entry) -> str:
+def alphabetical_key(match_pair: Tuple[Entry, List[str]]) -> str:
     """
     Key for sort functions to sort entries alphabetically.
     """
+    entry = match_pair[0]
     name = str(entry)
     if name.startswith("The "):
         return name[4:]
