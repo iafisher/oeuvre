@@ -81,7 +81,7 @@ class Application:
         Opens the entry for editing and then formats it before saving.
         """
         locdb = {} if args.strict_location else self.locdb
-        matching = read_matching_entries(self.directory, args.terms, locdb=locdb)
+        matching = self.read_matching_entries(args.terms, locdb=locdb)
         if not matching:
             error("no matching entries")
 
@@ -137,7 +137,7 @@ class Application:
                 error(f"{args.field} is not a keyword field")
 
         counter: defaultdict = defaultdict(int)
-        entries = read_entries(self.directory)
+        entries = self.read_entries()
         for entry in entries:
             for field in entry:
                 if field not in FIELDS:
@@ -205,7 +205,7 @@ class Application:
         if not confirm("Are you sure you want to reformat every entry? "):
             sys.exit(1)
 
-        for entry in read_entries(self.directory):
+        for entry in self.read_entries():
             assert isinstance(entry["filename"], str)
             path = os.path.join(self.directory, entry["filename"])
             text = format_for_disk(entry)
@@ -218,7 +218,7 @@ class Application:
         Searches all database entries and prints the matching ones.
         """
         locdb = {} if args.strict_location else self.locdb
-        matching = read_matching_entries(self.directory, args.terms, locdb=locdb)
+        matching = self.read_matching_entries(args.terms, locdb=locdb)
         for entry in sorted(matching, key=alphabetical_key):
             print(format_for_display(entry))
 
@@ -226,7 +226,7 @@ class Application:
         """
         Prints the full entry that matches the search terms.
         """
-        matching = read_matching_entries(self.directory, args.terms, locdb=self.locdb)
+        matching = self.read_matching_entries(args.terms, locdb=self.locdb)
         if len(matching) == 0:
             print("No matching entries.")
         elif len(matching) > 1:
@@ -252,38 +252,36 @@ class Application:
 
         return editpath
 
+    def read_matching_entries(
+        self, search_terms: List[str], *, locdb: Dict[str, List[str]]
+    ) -> List[Entry]:
+        """
+        Returns a list of all entries in the database that match the search terms.
+        """
+        entries = self.read_entries()
+        return [
+            entry
+            for entry in entries
+            if match(entry, search_terms, partial=True, locdb=locdb)
+        ]
 
-def read_matching_entries(
-    directory: str, search_terms: List[str], *, locdb: Dict[str, List[str]]
-) -> List[Entry]:
-    """
-    Returns a list of all entries in the database that match the search terms.
-    """
-    entries = read_entries(directory)
-    return [
-        entry
-        for entry in entries
-        if match(entry, search_terms, partial=True, locdb=locdb)
-    ]
+    def read_entries(self) -> List[Entry]:
+        """
+        Returns a list of all entries in the database.
+        """
+        entries = []
+        for path in sorted(glob.glob(self.directory + "/**/*.txt", recursive=True)):
+            if path.startswith(self.directory + "/editing/"):
+                continue
 
+            with open(path, "r", encoding="utf8") as f:
+                try:
+                    entry = parse_entry(self.directory, f)
+                except OeuvreError as e:
+                    error(str(e), lineno=e.lineno, path=path)
 
-def read_entries(directory: str) -> List[Entry]:
-    """
-    Returns a list of all entries in the database.
-    """
-    entries = []
-    for path in sorted(glob.glob(directory + "/**/*.txt", recursive=True)):
-        if path.startswith(directory + "/editing/"):
-            continue
-
-        with open(path, "r", encoding="utf8") as f:
-            try:
-                entry = parse_entry(directory, f)
-            except OeuvreError as e:
-                error(str(e), lineno=e.lineno, path=path)
-
-            entries.append(entry)
-    return entries
+                entries.append(entry)
+        return entries
 
 
 def confirm(prompt: str) -> bool:
