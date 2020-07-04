@@ -184,11 +184,7 @@ class Application:
         if not matching:
             error("no matching entries")
 
-        paths = [
-            os.path.join(self.directory, e.filename) for e in matching  # type: ignore
-        ]
-
-        self.edit_entries(paths, collect_keywords(entries))
+        self.edit_entries(matching, collect_keywords(entries))
 
     def main_keywords(self, args: argparse.Namespace) -> None:
         """
@@ -214,15 +210,19 @@ class Application:
         if os.path.exists(fullpath):
             error(f"{fullpath} already exists.")
 
-        blank_entry = Entry(title="", type="")
+        # Collect the keywords before so that we don't read the blank entry we are about
+        # to create.
+        entries = self.read_entries(best_effort=True)
+        keywords = collect_keywords(entries)
+
+        blank_entry = Entry(title="", type="", filename=args.path)
         text = blank_entry.format_for_disk()
         with open(fullpath, "w", encoding="utf-8") as f:
             f.write(text)
             f.write("\n")
 
-        entries = self.read_entries(best_effort=True)
-        success = self.edit_entries([args.path], collect_keywords(entries))
-        if not success:
+        save_count = self.edit_entries([blank_entry], keywords)
+        if save_count == 0:
             os.remove(fullpath)
 
     def main_reformat(self, args: argparse.Namespace) -> None:
@@ -271,56 +271,72 @@ class Application:
             verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
             print(matching[0][0].format_for_display(verbosity=verbosity))
 
-    def edit_entries(self, paths: List[str], keywords: Set[str]) -> bool:
+    def edit_entries(self, entries: List[Entry], keywords: Set[str]) -> int:
         """
-        Opens the given paths up for editing.
+        Opens the given entries up for editing.
+
+        Returns the number of entries which were successfully saved.
         """
-        fullpaths = [os.path.join(self.directory, p) for p in paths]
-        while True:
+        save_count = 0
+        while entries:
+            paths = [
+                os.path.join(self.directory, e.filename)  # type: ignore
+                for e in entries
+            ]
             editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor] + fullpaths)
+            r = subprocess.run([editor] + paths)
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
-            success = True
-            for shortpath, fullpath in zip(paths, fullpaths):
-                with open(fullpath, "r", encoding="utf8") as f:
+            remaining_entries = []
+            for old_entry in entries:
+                path = os.path.join(self.directory, old_entry.filename)  # type: ignore
+                with open(path, "r", encoding="utf8") as f:
                     text = f.read()
 
                 try:
-                    entry = parse_entry(text)
+                    new_entry = parse_entry(text)
                 except OeuvreError as e:
-                    success = False
-                    e.path = shortpath
+                    e.path = old_entry.filename
                     error(str(e), fatal=False)
                     if not confirm("Try again? "):
-                        # TODO(2020-07-02): Need to write back old entries.
-                        return False
+                        # Write back the original entry if the user gives up.
+                        old_text = old_entry.format_for_disk()
+                        with open(path, "w", encoding="utf-8") as f:
+                            f.write(old_text)
+                            f.write("\n")
+                        continue
+                    else:
+                        remaining_entries.append(old_entry)
                 else:
-                    new_keywords = set([k.keyword for k in entry.keywords]) - keywords
+                    all_keywords = set(k.keyword for k in new_entry.keywords)
+                    new_keywords = all_keywords - keywords
                     if new_keywords:
                         print(
-                            f"new keywords for {shortpath}: {', '.join(new_keywords)}"
+                            f"new keywords for {old_entry.filename}: "
+                            + f"{', '.join(new_keywords)}"
                         )
+
                         if not confirm("Keep? "):
-                            success = False
+                            remaining_entries.append(old_entry)
                             continue
 
                     # Call `format_for_disk` before opening the file for writing, so
                     # that if there's an error the file is not wiped out.
-                    text = entry.format_for_disk()
-                    with open(fullpath, "w", encoding="utf8") as f:
+                    text = new_entry.format_for_disk()
+                    with open(path, "w", encoding="utf8") as f:
                         f.write(text)
                         f.write("\n")
 
+                    save_count += 1
+
                     # Only print the entry if only one was opened for editing.
-                    if len(paths) == 1:
-                        print(entry.format_for_display(verbosity=VERBOSITY_FULL))
+                    if len(entries) == 1:
+                        print(new_entry.format_for_display(verbosity=VERBOSITY_FULL))
 
-            if success:
-                break
+            entries = remaining_entries
 
-        return True
+        return save_count
 
     def filter_entries(
         self,
