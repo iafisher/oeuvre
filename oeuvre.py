@@ -186,42 +186,8 @@ class Application:
         paths = [
             os.path.join(self.directory, e.filename) for e in matching  # type: ignore
         ]
-        while True:
-            editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor] + paths)
-            if r.returncode != 0:
-                error(f"editor process exited with error code {r.returncode}")
 
-            success = True
-            for old_entry in matching:
-                assert isinstance(old_entry.filename, str)
-                path = os.path.join(self.directory, old_entry.filename)
-                with open(path, "r", encoding="utf8") as f:
-                    text = f.read()
-
-                try:
-                    entry = parse_entry(text)
-                except OeuvreError as e:
-                    success = False
-                    e.path = path
-                    error(str(e), fatal=False)
-                    if not confirm("Try again? "):
-                        # TODO(2020-07-02): Need to write back old entries.
-                        sys.exit(1)
-                else:
-                    # Call `format_for_disk` before opening the file for writing, so
-                    # that if there's an error the file is not wiped out.
-                    text = entry.format_for_disk()
-                    with open(path, "w", encoding="utf8") as f:
-                        f.write(text)
-                        f.write("\n")
-
-                    # Only print the entry if only one was opened for editing.
-                    if len(matching) == 1:
-                        print(entry.format_for_display(verbosity=VERBOSITY_FULL))
-
-            if success:
-                break
+        self.edit_entries(paths)
 
     def main_keywords(self, args: argparse.Namespace) -> None:
         """
@@ -243,46 +209,19 @@ class Application:
         """
         Creates a new entry.
         """
-        path = os.path.join(self.directory, args.path)
-        if os.path.exists(path):
-            error(f"{path} already exists.")
+        fullpath = os.path.join(self.directory, args.path)
+        if os.path.exists(fullpath):
+            error(f"{fullpath} already exists.")
 
         blank_entry = Entry(title="", type="")
         text = blank_entry.format_for_disk()
-        with open(path, "w", encoding="utf-8") as f:
+        with open(fullpath, "w", encoding="utf-8") as f:
             f.write(text)
             f.write("\n")
 
-        while True:
-            editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor, path])
-            if r.returncode != 0:
-                error(f"editor process exited with error code {r.returncode}")
-
-            with open(path, "r", encoding="utf8") as f:
-                text = f.read()
-
-            try:
-                entry = parse_entry(text)
-            except OeuvreError as e:
-                e.path = path
-                error(str(e), fatal=False)
-                if not confirm("Try again? "):
-                    os.remove(path)
-                    sys.exit(1)
-
-                continue
-            else:
-                # Call `format_for_disk` before opening the file for writing, so
-                # that if there's an error the file is not wiped out.
-                text = entry.format_for_disk()
-                with open(path, "w", encoding="utf8") as f:
-                    f.write(text)
-                    f.write("\n")
-
-                print(text)
-
-            break
+        success = self.edit_entries([args.path])
+        if not success:
+            os.remove(fullpath)
 
     def main_reformat(self, args: argparse.Namespace) -> None:
         """
@@ -327,6 +266,48 @@ class Application:
         else:
             verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
             print(matching[0][0].format_for_display(verbosity=verbosity))
+
+    def edit_entries(self, paths: List[str]) -> bool:
+        """
+        Opens the given paths up for editing.
+        """
+        fullpaths = [os.path.join(self.directory, p) for p in paths]
+        while True:
+            editor = os.environ.get("EDITOR", "nano")
+            r = subprocess.run([editor] + fullpaths)
+            if r.returncode != 0:
+                error(f"editor process exited with error code {r.returncode}")
+
+            success = True
+            for shortpath, fullpath in zip(paths, fullpaths):
+                with open(fullpath, "r", encoding="utf8") as f:
+                    text = f.read()
+
+                try:
+                    entry = parse_entry(text)
+                except OeuvreError as e:
+                    success = False
+                    e.path = shortpath
+                    error(str(e), fatal=False)
+                    if not confirm("Try again? "):
+                        # TODO(2020-07-02): Need to write back old entries.
+                        return False
+                else:
+                    # Call `format_for_disk` before opening the file for writing, so
+                    # that if there's an error the file is not wiped out.
+                    text = entry.format_for_disk()
+                    with open(fullpath, "w", encoding="utf8") as f:
+                        f.write(text)
+                        f.write("\n")
+
+                    # Only print the entry if only one was opened for editing.
+                    if len(paths) == 1:
+                        print(entry.format_for_display(verbosity=VERBOSITY_FULL))
+
+            if success:
+                break
+
+        return True
 
     def read_matching_entries(
         self, search_terms: List[str], *, locdb: Dict[str, List[str]]
