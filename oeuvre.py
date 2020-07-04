@@ -19,7 +19,7 @@ import subprocess
 import sys
 import textwrap
 from collections import defaultdict
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 
 OEUVRE_DIRECTORY = "/home/iafisher/files/oeuvre"
@@ -179,7 +179,8 @@ class Application:
         Opens the entry for editing and formats it before saving.
         """
         locdb = {} if args.strict_location else self.locdb
-        matching = [e for e, _ in self.read_matching_entries(args.terms, locdb=locdb)]
+        entries = self.read_entries()
+        matching = [e for e, _ in self.filter_entries(entries, args.terms, locdb=locdb)]
         if not matching:
             error("no matching entries")
 
@@ -187,7 +188,7 @@ class Application:
             os.path.join(self.directory, e.filename) for e in matching  # type: ignore
         ]
 
-        self.edit_entries(paths)
+        self.edit_entries(paths, collect_keywords(entries))
 
     def main_keywords(self, args: argparse.Namespace) -> None:
         """
@@ -219,7 +220,8 @@ class Application:
             f.write(text)
             f.write("\n")
 
-        success = self.edit_entries([args.path])
+        entries = self.read_entries(best_effort=True)
+        success = self.edit_entries([args.path], collect_keywords(entries))
         if not success:
             os.remove(fullpath)
 
@@ -245,7 +247,7 @@ class Application:
         Searches all database entries and prints the matching ones.
         """
         locdb = {} if args.strict_location else self.locdb
-        matching = self.read_matching_entries(args.terms, locdb=locdb)
+        matching = self.filter_entries(self.read_entries(), args.terms, locdb=locdb)
         for entry, matches in sorted(matching, key=alphabetical_key):
             print(entry.format_title_for_display(color=True))
             if args.detailed:
@@ -256,7 +258,9 @@ class Application:
         """
         Prints the full entry that matches the search terms.
         """
-        matching = self.read_matching_entries(args.terms, locdb=self.locdb)
+        matching = self.filter_entries(
+            self.read_entries(), args.terms, locdb=self.locdb
+        )
         if len(matching) == 0:
             print("No matching entries.")
         elif len(matching) > 1:
@@ -267,7 +271,7 @@ class Application:
             verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
             print(matching[0][0].format_for_display(verbosity=verbosity))
 
-    def edit_entries(self, paths: List[str]) -> bool:
+    def edit_entries(self, paths: List[str], keywords: Set[str]) -> bool:
         """
         Opens the given paths up for editing.
         """
@@ -293,6 +297,15 @@ class Application:
                         # TODO(2020-07-02): Need to write back old entries.
                         return False
                 else:
+                    new_keywords = set([k.keyword for k in entry.keywords]) - keywords
+                    if new_keywords:
+                        print(
+                            f"new keywords for {shortpath}: {', '.join(new_keywords)}"
+                        )
+                        if not confirm("Keep? "):
+                            success = False
+                            continue
+
                     # Call `format_for_disk` before opening the file for writing, so
                     # that if there's an error the file is not wiped out.
                     text = entry.format_for_disk()
@@ -309,15 +322,18 @@ class Application:
 
         return True
 
-    def read_matching_entries(
-        self, search_terms: List[str], *, locdb: Dict[str, List[str]]
+    def filter_entries(
+        self,
+        entries: List[Entry],
+        search_terms: List[str],
+        *,
+        locdb: Dict[str, List[str]],
     ) -> List[Tuple[Entry, List[str]]]:
         """
-        Returns a list of all entries in the database that match the search terms.
+        Filters the list of entries by the given search terms.
 
         Each element of the returned list is a pair (entry, matches).
         """
-        entries = self.read_entries()
         ret = []
         for entry in entries:
             matches = match(entry, search_terms, locdb=locdb)
@@ -325,7 +341,7 @@ class Application:
                 ret.append((entry, matches))
         return ret
 
-    def read_entries(self) -> List[Entry]:
+    def read_entries(self, *, best_effort: bool = False) -> List[Entry]:
         """
         Returns a list of all entries in the database.
         """
@@ -341,10 +357,13 @@ class Application:
                 entry = parse_entry(text)
             except OeuvreError as e:
                 e.path = path
-                error(str(e))
-
-            entry.filename = path[len(self.directory) + 1 :]
-            entries.append(entry)
+                if best_effort:
+                    warning(str(e))
+                else:
+                    error(str(e))
+            else:
+                entry.filename = path[len(self.directory) + 1 :]
+                entries.append(entry)
 
         return entries
 
@@ -430,6 +449,16 @@ def get_enclosing_locations(locdb: Dict[str, List[str]], location: str) -> List[
         return direct_enclosing + indirect_enclosing
     else:
         return []
+
+
+def collect_keywords(entries: List[Entry]) -> Set[str]:
+    """
+    Returns the set of all keywords on the entries in the given list.
+    """
+    keywords = set()
+    for entry in entries:
+        keywords.update([k.keyword for k in entry.keywords])
+    return keywords
 
 
 def split_term(term: str) -> Tuple[str, str]:
