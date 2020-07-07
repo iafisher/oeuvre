@@ -113,11 +113,12 @@ class OeuvreTests(unittest.TestCase):
         os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_new_command"
         self.app.main(["--no-color", "new", "test_new_command_entry.txt"])
         self.app.main(["--no-color", "show", "test_new_command_entry.txt"])
+        # In this test case and those below, the entry is printed twice: once by the new
+        # command (or the edit command, as the case may be) and once by the show
+        # command. We check both to make sure the entry has been successfully persisted
+        # to disk.
         self.assertEqual(
             stdout.getvalue(),
-            # The entry is printed twice: once by the new command and once by the show
-            # command. We check both to make sure the entry has been successfully
-            # persisted to disk.
             "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
             + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
         )
@@ -127,15 +128,35 @@ class OeuvreTests(unittest.TestCase):
         os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_edit_command"
         self.app.main(["--no-color", "edit", "libra.txt"])
         self.app.main(["--no-color", "show", "libra.txt"])
-        self.assertEqual(
-            stdout.getvalue(),
-            # The entry is printed twice: once by the edit command and once by the show
-            # command. We check both to make sure the entry has been successfully
-            # persisted to disk.
-            LIBRA_EDITED + LIBRA_EDITED,
-        )
+        self.assertEqual(stdout.getvalue(), LIBRA_EDITED + LIBRA_EDITED)
 
-    # TODO(#24): Test adding a new keyword.
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_new_command_adding_new_keyword(self, stdout):
+        with patch("sys.stdin", new=StringIO("yes\n")):
+            os.environ["EDITOR"] = (
+                "python3 oeuvre_test.py --fake-editor "
+                + "test_new_command_adding_new_keyword"
+            )
+            self.app.main(
+                ["--no-color", "new", "test_new_command_adding_new_keyword.txt"]
+            )
+            self.app.main(
+                ["--no-color", "show", "test_new_command_adding_new_keyword.txt"]
+            )
+            self.assertEqual(
+                stdout.getvalue(),
+                "new keywords for test_new_command_adding_new_keyword.txt: "
+                + "film-noir\nKeep? "
+                + "title: The Maltese Falcon\n"
+                + "type: film\n"
+                + "keywords:\n"
+                + "  film-noir\n"
+                + "title: The Maltese Falcon\n"
+                + "type: film\n"
+                + "keywords:\n"
+                + "  film-noir\n",
+            )
+
     # TODO(#24): Test editing multiple files.
     # TODO(#24): Test invalid edit (e.g., wrong value for 'type' field).
 
@@ -182,27 +203,24 @@ class OeuvreTests(unittest.TestCase):
 def fake_editor(test_case, paths):
     if test_case == "test_new_command":
         path = paths[0]
-        with open(path, "r", encoding="utf-8") as f:
-            contents = f.read()
-
+        contents = read_file(path)
         contents = set_field(contents, "title", "Blood Meridian")
         contents = set_field(contents, "creator", "Cormac McCarthy")
         contents = set_field(contents, "type", "book")
-
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(contents)
+        write_file(path, contents)
     elif test_case == "test_edit_command":
         path = paths[0]
-        with open(path, "r", encoding="utf-8") as f:
-            contents = f.read()
-
+        contents = read_file(path)
         contents = set_field(contents, "creator", "Thomas Pynchon", overwrite=True)
-
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(contents)
+        write_file(path, contents)
+    elif test_case == "test_new_command_adding_new_keyword":
+        path = paths[0]
+        contents = read_file(path)
+        contents = set_field(contents, "title", "The Maltese Falcon")
+        contents = set_field(contents, "type", "film")
+        contents = add_to_list_field(contents, "keywords", "film-noir")
+        write_file(path, contents)
     else:
-        # Note that this exception will never be seen in the test suite because the code
-        # runs in a subcommand.
         raise Exception(f"unknown test case for fake editor: {test_case}")
 
 
@@ -217,6 +235,25 @@ def set_field(contents, field, value, *, overwrite=False):
         raise Exception(f"unable to set field {field!r}")
 
     return new_contents
+
+
+def add_to_list_field(contents, field, value):
+    pattern = re.compile("^" + re.escape(field) + r":\s*$", re.MULTILINE)
+    new_contents = pattern.sub(field + ":\n  " + value, contents, count=1)
+    if new_contents == contents:
+        raise Exception(f"unable to add to list field {field!r}")
+
+    return new_contents
+
+
+def read_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def write_file(path, contents):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(contents)
 
 
 class FakeEditorTests(unittest.TestCase):
@@ -238,6 +275,16 @@ class FakeEditorTests(unittest.TestCase):
         old_contents = "title: Bigfoot\ncreator:\nyear:\n"
         with self.assertRaises(Exception):
             set_field(old_contents, "title", "Sasquatch", overwrite=False)
+
+    def test_add_to_list_field(self):
+        old_contents = "title:\nkeywords:\nnotes:\n"
+        new_contents = add_to_list_field(old_contents, "keywords", "whatever")
+        self.assertEqual(new_contents, "title:\nkeywords:\n  whatever\nnotes:\n")
+
+    def test_add_to_list_field_with_missing_field(self):
+        old_contents = "title:\nkeywords:\nnotes:\n"
+        with self.assertRaises(Exception):
+            add_to_list_field(old_contents, "settings", "whatever")
 
 
 LIBRA_BRIEF = """\
