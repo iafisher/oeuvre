@@ -71,15 +71,6 @@ class Entry:
         """
         return self._format(verbosity=verbosity, display=True)
 
-    def format_title_for_display(self, *, color: bool) -> str:
-        """
-        Returns a string representation of the entry's title.
-        """
-        title = blue(self.title) if color else self.title
-        creator_suffix = f" ({self.creator})" if self.creator else ""
-        filename_suffix = f" [{self.filename}]" if self.filename else ""
-        return title + creator_suffix + filename_suffix
-
     def format_for_disk(self) -> str:
         """
         Returns the string representation of the entry to be written to disk.
@@ -105,8 +96,10 @@ class Entry:
         builder.longform_field("quotes", self.quotes)
         return builder.build()
 
-    def __str__(self) -> str:
-        return self.format_title_for_display(color=False)
+    def __repr__(self):
+        return (
+            f"Entry(title={self.title!r}, type={self.type!r}, creator={self.creator!r}"
+        )
 
 
 class Application:
@@ -129,6 +122,7 @@ class Application:
         self.stdout = stdout
         self.stderr = stderr
         self.stdin = stdin
+        self.use_colors = True
 
     def main(self, args: List[str]) -> None:
         """
@@ -172,7 +166,7 @@ class Application:
             or not os.isatty(self.stdout.fileno())
             or not os.isatty(self.stderr.fileno())
         ):
-            turn_off_colors()
+            self.use_colors = False
 
         if hasattr(parsed_args, "func"):
             parsed_args.func(parsed_args)
@@ -254,7 +248,7 @@ class Application:
         locdb = {} if args.strict_location else self.locdb
         matching = self.filter_entries(self.read_entries(), args.terms, locdb=locdb)
         for entry, matches in sorted(matching, key=alphabetical_key):
-            self.print(entry.format_title_for_display(color=True))
+            self.print(self.format_title_for_display(entry, color=True))
             if args.detailed:
                 for match in matches:
                     self.print("  " + match)
@@ -394,6 +388,15 @@ class Application:
 
         return entries
 
+    def format_title_for_display(self, entry: Entry, *, color: bool) -> str:
+        """
+        Returns a string representation of the entry's title.
+        """
+        title = self.blue(entry.title) if color else entry.title
+        creator_suffix = f" ({entry.creator})" if entry.creator else ""
+        filename_suffix = f" [{entry.filename}]" if entry.filename else ""
+        return title + creator_suffix + filename_suffix
+
     def print(self, *args, **kwargs) -> None:
         kwargs.setdefault("file", self.stdout)
         print(*args, **kwargs)
@@ -426,6 +429,13 @@ class Application:
                 return True
             elif yesno.startswith("n"):
                 return False
+
+    def blue(self, text: str) -> str:
+        """Returns a string that will display as blue using ANSI color codes."""
+        return self.color(text, "94")
+
+    def color(self, text: str, color: str) -> str:
+        return f"\033[{color}m{text}\033[0m" if self.use_colors else text
 
 
 def match(
@@ -854,38 +864,6 @@ def alphabetical_key(match_pair: Tuple[Entry, List[str]]) -> str:
         return name[3:]
     else:
         return name
-
-
-def turn_off_colors() -> None:
-    """Turns off colored output globally for the program."""
-    global _NO_COLOR
-    _NO_COLOR = True
-
-
-def red(text: str) -> str:
-    """Returns a string that will display as red using ANSI color codes."""
-    return _colored(text, _COLOR_RED)
-
-
-def blue(text: str) -> str:
-    """Returns a string that will display as blue using ANSI color codes."""
-    return _colored(text, _COLOR_BLUE)
-
-
-def green(text: str) -> str:
-    """Returns a string that will display as green using ANSI color codes."""
-    return _colored(text, _COLOR_GREEN)
-
-
-def _colored(text: str, color: str) -> str:
-    return f"\033[{color}m{text}\033[{_COLOR_RESET}m" if not _NO_COLOR else text
-
-
-_COLOR_RED = "91"
-_COLOR_BLUE = "94"
-_COLOR_GREEN = "92"
-_COLOR_RESET = "0"
-_NO_COLOR = False
 
 
 class OeuvreError(Exception):
