@@ -20,6 +20,13 @@ class FakeStdout(StringIO):
         return self.original_stdout.fileno()
 
 
+class FakeStderr(StringIO):
+    original_stderr = sys.stderr
+
+    def fileno(self):
+        return self.original_stderr.fileno()
+
+
 class OeuvreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -80,6 +87,14 @@ class OeuvreTests(unittest.TestCase):
             stdout.getvalue(),
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n",
         )
+
+    @patch("sys.stderr", new_callable=FakeStderr)
+    def test_search_command_with_unknown_field(self, stderr):
+        # Regression test for issue #23
+        with self.assertRaises(SystemExit):
+            self.app.main(["--no-color", "search", "lol:whatever"])
+
+        self.assertEqual(stderr.getvalue(), "error: unknown field 'lol'\n")
 
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"

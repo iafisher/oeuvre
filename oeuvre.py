@@ -402,6 +402,9 @@ def match(
         search_field, term = split_term(search_term)
         before = len(matches)
         if search_field:
+            if not hasattr(entry, search_field):
+                error(f"unknown field {search_field!r}")
+
             matches.extend(
                 match_field(search_field, getattr(entry, search_field), term, locdb)
             )
