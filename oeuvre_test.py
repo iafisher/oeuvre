@@ -58,6 +58,12 @@ class OeuvreTests(unittest.TestCase):
             + "  type: matched text (book)\n",
         )
 
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_search_command_on_year_field(self, stdout):
+        # Regression test for issue #19
+        self.app.main(["--no-color", "search", "year:1988"])
+        self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
         lines = list(enumerate(text.splitlines(), start=1))

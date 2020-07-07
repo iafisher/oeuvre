@@ -423,17 +423,17 @@ def match_field(
     if not value:
         return []
 
-    if isinstance(value, str):
-        if search_term.lower() in value.lower():
-            return [f"{field}: matched text ({value})"]
-        else:
-            return []
-    else:
+    if isinstance(value, list):
         matches = []
         for subvalue in value:
             if search_term.lower() in subvalue.keyword.lower():
                 matches.append(f"{field}: matched keyword ({subvalue.keyword})")
         return matches
+    else:
+        if search_term.lower() in str(value).lower():
+            return [f"{field}: matched text ({value})"]
+        else:
+            return []
 
 
 def match_location(
