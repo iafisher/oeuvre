@@ -20,7 +20,7 @@ import subprocess
 import sys
 import textwrap
 from collections import defaultdict
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Dict, IO, Iterable, List, Optional, Set, Tuple, Union
 
 
 OEUVRE_DIRECTORY = "/home/iafisher/files/oeuvre"
@@ -114,7 +114,7 @@ class Application:
     A class to represent the oeuvre application.
     """
 
-    def __init__(self, directory: str) -> None:
+    def __init__(self, directory: str, *, stdout: IO, stderr: IO, stdin: IO) -> None:
         """
         Args:
           directory: The path to the directory where the database entries are located.
@@ -125,6 +125,10 @@ class Application:
                 self.locdb = json.load(f)
         except FileNotFoundError:
             self.locdb = {}
+
+        self.stdout = stdout
+        self.stderr = stderr
+        self.stdin = stdin
 
     def main(self, args: List[str]) -> None:
         """
@@ -165,15 +169,15 @@ class Application:
 
         if (
             parsed_args.no_color
-            or not os.isatty(sys.stdout.fileno())
-            or not os.isatty(sys.stderr.fileno())
+            or not os.isatty(self.stdout.fileno())
+            or not os.isatty(self.stderr.fileno())
         ):
             turn_off_colors()
 
         if hasattr(parsed_args, "func"):
             parsed_args.func(parsed_args)
         else:
-            error("no subcommand")
+            self.error("no subcommand")
 
     def main_edit(self, args: argparse.Namespace) -> None:
         """
@@ -183,7 +187,7 @@ class Application:
         entries = self.read_entries()
         matching = [e for e, _ in self.filter_entries(entries, args.terms, locdb=locdb)]
         if not matching:
-            error("no matching entries")
+            self.error("no matching entries")
 
         self.edit_entries(matching, collect_keywords(entries))
 
@@ -201,7 +205,7 @@ class Application:
         # by name.
         key = lambda kv: (-kv[1], kv[0]) if args.sorted else kv[0]
         for keyword, count in sorted(counter.items(), key=key):
-            print(f"{keyword} ({count})")
+            self.print(f"{keyword} ({count})")
 
     def main_new(self, args: argparse.Namespace) -> None:
         """
@@ -209,7 +213,7 @@ class Application:
         """
         fullpath = os.path.join(self.directory, args.path)
         if os.path.exists(fullpath):
-            error(f"{fullpath} already exists.")
+            self.error(f"{fullpath} already exists.")
 
         # Collect the keywords before so that we don't read the blank entry we are about
         # to create.
@@ -230,7 +234,7 @@ class Application:
         """
         Reformats all database entries.
         """
-        if not confirm("Are you sure you want to reformat every entry? "):
+        if not self.confirm("Are you sure you want to reformat every entry? "):
             sys.exit(1)
 
         for entry in self.read_entries():
@@ -250,10 +254,10 @@ class Application:
         locdb = {} if args.strict_location else self.locdb
         matching = self.filter_entries(self.read_entries(), args.terms, locdb=locdb)
         for entry, matches in sorted(matching, key=alphabetical_key):
-            print(entry.format_title_for_display(color=True))
+            self.print(entry.format_title_for_display(color=True))
             if args.detailed:
                 for match in matches:
-                    print("  " + match)
+                    self.print("  " + match)
 
     def main_show(self, args: argparse.Namespace) -> None:
         """
@@ -263,14 +267,14 @@ class Application:
             self.read_entries(), args.terms, locdb=self.locdb
         )
         if len(matching) == 0:
-            print("No matching entries.")
+            self.print("No matching entries.")
         elif len(matching) > 1:
-            print("Multiple matching entries:")
+            self.print("Multiple matching entries:")
             for entry, _ in sorted(matching, key=alphabetical_key):
-                print("  " + str(entry))
+                self.print("  " + str(entry))
         else:
             verbosity = VERBOSITY_BRIEF if args.brief else VERBOSITY_FULL
-            print(matching[0][0].format_for_display(verbosity=verbosity))
+            self.print(matching[0][0].format_for_display(verbosity=verbosity))
 
     def edit_entries(self, entries: List[Entry], keywords: Set[str]) -> int:
         """
@@ -287,7 +291,7 @@ class Application:
             editor = os.environ.get("EDITOR", "nano").split()
             r = subprocess.run(editor + paths)
             if r.returncode != 0:
-                error(f"editor process exited with error code {r.returncode}")
+                self.error(f"editor process exited with error code {r.returncode}")
 
             remaining_entries = []
             for old_entry in entries:
@@ -299,8 +303,8 @@ class Application:
                     new_entry = parse_entry(text)
                 except OeuvreError as e:
                     e.path = old_entry.filename
-                    error(str(e), fatal=False)
-                    if not confirm("Try again? "):
+                    self.error(str(e), fatal=False)
+                    if not self.confirm("Try again? "):
                         # Write back the original entry if the user gives up.
                         old_text = old_entry.format_for_disk()
                         with open(path, "w", encoding="utf-8") as f:
@@ -313,12 +317,12 @@ class Application:
                     all_keywords = set(k.keyword for k in new_entry.keywords)
                     new_keywords = all_keywords - keywords
                     if new_keywords:
-                        print(
+                        self.print(
                             f"new keywords for {old_entry.filename}: "
                             + f"{', '.join(new_keywords)}"
                         )
 
-                        if not confirm("Keep? "):
+                        if not self.confirm("Keep? "):
                             remaining_entries.append(old_entry)
                             continue
 
@@ -333,7 +337,9 @@ class Application:
 
                     # Only print the entry if only one was opened for editing.
                     if len(entries) == 1:
-                        print(new_entry.format_for_display(verbosity=VERBOSITY_FULL))
+                        self.print(
+                            new_entry.format_for_display(verbosity=VERBOSITY_FULL)
+                        )
 
             entries = remaining_entries
 
@@ -353,7 +359,11 @@ class Application:
         """
         ret = []
         for entry in entries:
-            matches = match(entry, search_terms, locdb=locdb)
+            try:
+                matches = match(entry, search_terms, locdb=locdb)
+            except ValueError as e:
+                self.error(str(e))
+
             if matches:
                 ret.append((entry, matches))
         return ret
@@ -375,14 +385,47 @@ class Application:
             except OeuvreError as e:
                 e.path = path
                 if best_effort:
-                    warning(str(e))
+                    self.warning(str(e))
                 else:
-                    error(str(e))
+                    self.error(str(e))
             else:
                 entry.filename = path[len(self.directory) + 1 :]
                 entries.append(entry)
 
         return entries
+
+    def print(self, *args, **kwargs) -> None:
+        kwargs.setdefault("file", self.stdout)
+        print(*args, **kwargs)
+
+    def error(self, message: str, *, fatal: bool = True) -> None:
+        print(f"error: {message}", file=self.stderr)
+        if fatal:
+            sys.exit(1)
+
+    def warning(self, message: str) -> None:
+        print(f"warning: {message}", file=self.stderr)
+
+    def confirm(self, prompt: str) -> bool:
+        """
+        Prompts the user for confirmation and returns whether they accepted or not.
+        """
+        while True:
+            print(prompt, end="", flush=True, file=self.stdout)
+            try:
+                yesno = self.stdin.readline()
+            except EOFError:
+                print(file=self.stdout)
+                return False
+            except KeyboardInterrupt:
+                print(file=self.stdout)
+                sys.exit(1)
+
+            yesno = yesno.strip().lower()
+            if yesno.startswith("y"):
+                return True
+            elif yesno.startswith("n"):
+                return False
 
 
 def match(
@@ -405,7 +448,7 @@ def match(
         if search_field:
             search_field = resolve_alias(search_field)
             if not hasattr(entry, search_field):
-                error(f"unknown field {search_field!r}")
+                raise ValueError(f"unknown field {search_field!r}")
 
             matches.extend(
                 match_field(search_field, getattr(entry, search_field), term, locdb)
@@ -813,27 +856,6 @@ def alphabetical_key(match_pair: Tuple[Entry, List[str]]) -> str:
         return name
 
 
-def confirm(prompt: str) -> bool:
-    """
-    Prompts the user for confirmation and returns whether they accepted or not.
-    """
-    while True:
-        try:
-            yesno = input(prompt)
-        except EOFError:
-            print()
-            return False
-        except KeyboardInterrupt:
-            print()
-            sys.exit(1)
-
-        yesno = yesno.strip().lower()
-        if yesno.startswith("y"):
-            return True
-        elif yesno.startswith("n"):
-            return False
-
-
 def turn_off_colors() -> None:
     """Turns off colored output globally for the program."""
     global _NO_COLOR
@@ -866,16 +888,6 @@ _COLOR_RESET = "0"
 _NO_COLOR = False
 
 
-def error(message: str, *, fatal: bool = True) -> None:
-    print(f"error: {message}", file=sys.stderr)
-    if fatal:
-        sys.exit(1)
-
-
-def warning(message: str) -> None:
-    print(f"warning: {message}", file=sys.stderr)
-
-
 class OeuvreError(Exception):
     def __init__(
         self, *args, lineno: Optional[int] = None, path: Optional[str] = None, **kwargs
@@ -897,5 +909,7 @@ class OeuvreError(Exception):
 
 
 if __name__ == "__main__":
-    app = Application(OEUVRE_DIRECTORY)
+    app = Application(
+        OEUVRE_DIRECTORY, stdout=sys.stdout, stderr=sys.stderr, stdin=sys.stdin
+    )
     app.main(sys.argv[1:])
