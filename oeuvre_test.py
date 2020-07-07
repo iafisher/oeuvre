@@ -70,6 +70,17 @@ class OeuvreTests(unittest.TestCase):
         self.app.main(["--no-color", "search", "year:1988", "type:book"])
         self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
 
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_search_command_with_location(self, stdout):
+        # Regression test for issue #22
+        # Note that Crime and Punishment has St. Petersburg as its location, not Russia,
+        # so this tests the use of the location database to look up locations.
+        self.app.main(["--no-color", "search", "locations:russia"])
+        self.assertEqual(
+            stdout.getvalue(),
+            "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n",
+        )
+
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
         lines = list(enumerate(text.splitlines(), start=1))
@@ -106,10 +117,10 @@ year: 1988
 language: English
 plot-summary: <hidden>
 locations:
-  Dallas
-  New Orleans
-  Tokyo
-  Moscow
+  dallas
+  new-orleans
+  tokyo
+  moscow
 
 keywords:
   conspiracy
@@ -140,10 +151,10 @@ plot-summary:
   book alternate between Oswald's and various conspirator's perspectives.
 
 locations:
-  Dallas
-  New Orleans
-  Tokyo
-  Moscow
+  dallas
+  new-orleans
+  tokyo
+  moscow
 
 keywords:
   conspiracy

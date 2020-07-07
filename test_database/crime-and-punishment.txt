@@ -3,4 +3,4 @@ creator: Fyodor Dostoyevsky
 type: book
 language: Russian
 locations:
-  Russia
+  st-petersburg

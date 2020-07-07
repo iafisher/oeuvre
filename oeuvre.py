@@ -403,16 +403,20 @@ def match(
         before = len(matches)
         if search_field:
             matches.extend(
-                match_field(search_field, getattr(entry, search_field), term)
+                match_field(search_field, getattr(entry, search_field), term, locdb)
             )
         else:
-            matches.extend(match_field("filename", entry.filename, search_term))
-            matches.extend(match_field("title", entry.title, search_term))
-            matches.extend(match_field("creator", entry.creator, search_term))
-            matches.extend(match_field("characters", entry.characters, search_term))
-            matches.extend(match_location(entry.locations, search_term, locdb))
-            matches.extend(match_field("keywords", entry.keywords, search_term))
-            matches.extend(match_field("settings", entry.settings, search_term))
+            matches.extend(match_field("filename", entry.filename, search_term, locdb))
+            matches.extend(match_field("title", entry.title, search_term, locdb))
+            matches.extend(match_field("creator", entry.creator, search_term, locdb))
+            matches.extend(
+                match_field("characters", entry.characters, search_term, locdb)
+            )
+            matches.extend(
+                match_field("locations", entry.locations, search_term, locdb)
+            )
+            matches.extend(match_field("keywords", entry.keywords, search_term, locdb))
+            matches.extend(match_field("settings", entry.settings, search_term, locdb))
 
         after = len(matches)
         if before == after:
@@ -423,10 +427,17 @@ def match(
 
 
 def match_field(
-    field: str, value: Union[Optional[str], List["KeywordField"]], search_term: str
+    field: str,
+    value: Union[Optional[str], List["KeywordField"]],
+    search_term: str,
+    locdb: Dict[str, List[str]],
 ) -> List[str]:
     if not value:
         return []
+
+    if field == "locations":
+        assert isinstance(value, list)
+        return match_location(value, search_term, locdb)
 
     if isinstance(value, list):
         matches = []
