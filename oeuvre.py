@@ -14,6 +14,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import readline  # noqa: F401
 import subprocess
 import sys
@@ -443,14 +444,15 @@ def match_field(
         assert isinstance(value, list)
         return match_location(value, search_term, locdb)
 
+    pattern = re.compile(r"\b" + re.escape(search_term) + r"\b", flags=re.IGNORECASE)
     if isinstance(value, list):
         matches = []
         for subvalue in value:
-            if search_term.lower() in subvalue.keyword.lower():
+            if pattern.search(subvalue.keyword):
                 matches.append(f"{field}: matched keyword ({subvalue.keyword})")
         return matches
     else:
-        if search_term.lower() in str(value).lower():
+        if pattern.search(str(value)):
             return [f"{field}: matched text ({value})"]
         else:
             return []

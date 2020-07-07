@@ -96,6 +96,12 @@ class OeuvreTests(unittest.TestCase):
 
         self.assertEqual(stderr.getvalue(), "error: unknown field 'lol'\n")
 
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_search_command_with_partial_word_match(self, stdout):
+        # Regression test for issue #4
+        self.app.main(["--no-color", "search", "kw:modernist"])
+        self.assertEqual(stdout.getvalue(), "")
+
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
         lines = list(enumerate(text.splitlines(), start=1))
