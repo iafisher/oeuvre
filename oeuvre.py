@@ -402,6 +402,7 @@ def match(
         search_field, term = split_term(search_term)
         before = len(matches)
         if search_field:
+            search_field = resolve_alias(search_field)
             if not hasattr(entry, search_field):
                 error(f"unknown field {search_field!r}")
 
@@ -505,6 +506,22 @@ def split_term(term: str) -> Tuple[str, str]:
         return (field, term)
     else:
         return ("", term)
+
+
+def resolve_alias(term: str) -> str:
+    """
+    Resolves search term aliases (e.g., 'loc' for 'locations').
+    """
+    if term in ("loc", "location"):
+        return "locations"
+    elif term == "kw":
+        return "keywords"
+    elif term == "setting":
+        return "setting"
+    elif term == "character":
+        return "characters"
+    else:
+        return term
 
 
 class KeywordField:
