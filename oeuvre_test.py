@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -28,12 +29,14 @@ class FakeStderr(StringIO):
 
 
 class OeuvreTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls._directory = tempfile.TemporaryDirectory()
-        d = os.path.join(cls._directory.name, "test_database")
+    def setUp(self):
+        self._directory = tempfile.TemporaryDirectory()
+        d = os.path.join(self._directory.name, "test_database")
         shutil.copytree("test_database", d)
-        cls.app = Application(d)
+        self.app = Application(d)
+        # Guard against different test cases interfering with one another by resetting
+        # the editor before each test case.
+        os.environ["EDITOR"] = "does not exist"
 
     @patch("sys.stdout", new_callable=FakeStdout)
     def test_show_command(self, stdout):
@@ -102,6 +105,40 @@ class OeuvreTests(unittest.TestCase):
         self.app.main(["--no-color", "search", "kw:modernist"])
         self.assertEqual(stdout.getvalue(), "")
 
+    # See the long comment below this test class for an explanation on how the new and
+    # edit commands are tested.
+
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_new_command(self, stdout):
+        os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_new_command"
+        self.app.main(["--no-color", "new", "test_new_command_entry.txt"])
+        self.app.main(["--no-color", "show", "test_new_command_entry.txt"])
+        self.assertEqual(
+            stdout.getvalue(),
+            # The entry is printed twice: once by the new command and once by the show
+            # command. We check both to make sure the entry has been successfully
+            # persisted to disk.
+            "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
+            + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
+        )
+
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_edit_command(self, stdout):
+        os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_edit_command"
+        self.app.main(["--no-color", "edit", "libra.txt"])
+        self.app.main(["--no-color", "show", "libra.txt"])
+        self.assertEqual(
+            stdout.getvalue(),
+            # The entry is printed twice: once by the edit command and once by the show
+            # command. We check both to make sure the entry has been successfully
+            # persisted to disk.
+            LIBRA_EDITED + LIBRA_EDITED,
+        )
+
+    # TODO(#24): Test adding a new keyword.
+    # TODO(#24): Test editing multiple files.
+    # TODO(#24): Test invalid edit (e.g., wrong value for 'type' field).
+
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
         lines = list(enumerate(text.splitlines(), start=1))
@@ -125,9 +162,82 @@ class OeuvreTests(unittest.TestCase):
         )
         self.assertEqual(lines, [(4, "foo: bar"), (3, "")])
 
-    @classmethod
-    def tearDownClass(cls):
-        cls._directory.cleanup()
+    def tearDown(self):
+        self._directory.cleanup()
+
+
+# Testing the new and edit subcommands is tricky because they normally involve opening
+# a text editor for the user to edit one or more entries. It would be difficult to
+# programmatically interact with a text editor, so instead the test suite patches in a
+# custom editor (via the EDITOR environment variable) which is really just a shell
+# script that edits the entry without user interaction.
+#
+# To keep all of the testing code in one place, the shell script that is used as the
+# editor is actually this very file! When invoked with the --fake-editor flag, this
+# Python file acts as a fake editor rather than a test suite. It calls the `fake_editor`
+# function below with whatever test case is being run and all the paths to be edited.
+# `fake_editor` makes different changes depending on which test case is being run.
+
+
+def fake_editor(test_case, paths):
+    if test_case == "test_new_command":
+        path = paths[0]
+        with open(path, "r", encoding="utf-8") as f:
+            contents = f.read()
+
+        contents = set_field(contents, "title", "Blood Meridian")
+        contents = set_field(contents, "creator", "Cormac McCarthy")
+        contents = set_field(contents, "type", "book")
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents)
+    elif test_case == "test_edit_command":
+        path = paths[0]
+        with open(path, "r", encoding="utf-8") as f:
+            contents = f.read()
+
+        contents = set_field(contents, "creator", "Thomas Pynchon", overwrite=True)
+
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(contents)
+    else:
+        # Note that this exception will never be seen in the test suite because the code
+        # runs in a subcommand.
+        raise Exception(f"unknown test case for fake editor: {test_case}")
+
+
+def set_field(contents, field, value, *, overwrite=False):
+    if overwrite:
+        pattern = re.compile("^" + re.escape(field) + r":.*$", re.MULTILINE)
+    else:
+        pattern = re.compile("^" + re.escape(field) + r":\s*$", re.MULTILINE)
+
+    new_contents = pattern.sub(field + ": " + value, contents, count=1)
+    if new_contents == contents:
+        raise Exception(f"unable to set field {field!r}")
+
+    return new_contents
+
+
+class FakeEditorTests(unittest.TestCase):
+    """
+    Small test suite for the functions used by the fake editor in tests.
+    """
+
+    def test_set_field(self):
+        old_contents = "title:\ncreator:\nyear:\n"
+        new_contents = set_field(old_contents, "title", "Lorem Ipsum")
+        self.assertEqual(new_contents, "title: Lorem Ipsum\ncreator:\nyear:\n")
+
+    def test_set_field_with_overwrite(self):
+        old_contents = "title: Bigfoot\ncreator:\nyear:\n"
+        new_contents = set_field(old_contents, "title", "Sasquatch", overwrite=True)
+        self.assertEqual(new_contents, "title: Sasquatch\ncreator:\nyear:\n")
+
+    def test_set_field_with_no_overwrite(self):
+        old_contents = "title: Bigfoot\ncreator:\nyear:\n"
+        with self.assertRaises(Exception):
+            set_field(old_contents, "title", "Sasquatch", overwrite=False)
 
 
 LIBRA_BRIEF = """\
@@ -151,9 +261,9 @@ keywords:
   postmodernist
 """
 
-LIBRA_FULL = """\
+LIBRA_TEMPLATE = """\
 title: Libra
-creator: Don DeLillo
+creator: {}
 type: book
 year: 1988
 language: English
@@ -184,7 +294,14 @@ keywords:
   non-linear
   postmodernist
 """
+LIBRA_FULL = LIBRA_TEMPLATE.format("Don DeLillo")
+LIBRA_EDITED = LIBRA_TEMPLATE.format("Thomas Pynchon")
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if "--fake-editor" in sys.argv:
+        test_case = sys.argv[2]
+        paths = sys.argv[3:]
+        fake_editor(test_case, paths)
+    else:
+        unittest.main()

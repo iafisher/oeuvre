@@ -284,8 +284,8 @@ class Application:
                 os.path.join(self.directory, e.filename)  # type: ignore
                 for e in entries
             ]
-            editor = os.environ.get("EDITOR", "nano")
-            r = subprocess.run([editor] + paths)
+            editor = os.environ.get("EDITOR", "nano").split()
+            r = subprocess.run(editor + paths)
             if r.returncode != 0:
                 error(f"editor process exited with error code {r.returncode}")
 
