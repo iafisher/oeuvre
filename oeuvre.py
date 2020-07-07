@@ -397,15 +397,15 @@ def match(
 
     Search terms are joined by an implicit AND operator.
     """
-    matches = []
+    matches: List[str] = []
     for search_term in search_terms:
         search_field, term = split_term(search_term)
+        before = len(matches)
         if search_field:
             matches.extend(
                 match_field(search_field, getattr(entry, search_field), term)
             )
         else:
-            matches = []
             matches.extend(match_field("filename", entry.filename, search_term))
             matches.extend(match_field("title", entry.title, search_term))
             matches.extend(match_field("creator", entry.creator, search_term))
@@ -413,6 +413,11 @@ def match(
             matches.extend(match_location(entry.locations, search_term, locdb))
             matches.extend(match_field("keywords", entry.keywords, search_term))
             matches.extend(match_field("settings", entry.settings, search_term))
+
+        after = len(matches)
+        if before == after:
+            # No match.
+            return []
 
     return matches
 

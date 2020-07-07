@@ -64,6 +64,12 @@ class OeuvreTests(unittest.TestCase):
         self.app.main(["--no-color", "search", "year:1988"])
         self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
 
+    @patch("sys.stdout", new_callable=FakeStdout)
+    def test_search_command_with_multiple_terms(self, stdout):
+        # Regression test for issue #21
+        self.app.main(["--no-color", "search", "year:1988", "type:book"])
+        self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
         lines = list(enumerate(text.splitlines(), start=1))
