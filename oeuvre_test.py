@@ -38,124 +38,129 @@ class OeuvreTests(unittest.TestCase):
         # the editor before each test case.
         os.environ["EDITOR"] = "does not exist"
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_show_command(self, stdout):
-        self.app.main(["show", "libra.txt"])
-        self.assertEqual(stdout.getvalue(), LIBRA_FULL)
+    def test_show_command(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["show", "libra.txt"])
+            self.assertEqual(stdout.getvalue(), LIBRA_FULL)
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_show_command_with_brief_flag(self, stdout):
-        self.app.main(["show", "--brief", "libra.txt"])
-        self.assertEqual(stdout.getvalue(), LIBRA_BRIEF)
+    def test_show_command_with_brief_flag(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["show", "--brief", "libra.txt"])
+            self.assertEqual(stdout.getvalue(), LIBRA_BRIEF)
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_search_command_with_bare_keyword(self, stdout):
-        self.app.main(["--no-color", "search", "DeLillo", "--detailed"])
-        self.assertEqual(
-            stdout.getvalue(),
-            "Libra (Don DeLillo) [libra.txt]\n"
-            + "  creator: matched text (Don DeLillo)\n",
-        )
+    def test_search_command_with_bare_keyword(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["--no-color", "search", "DeLillo", "--detailed"])
+            self.assertEqual(
+                stdout.getvalue(),
+                "Libra (Don DeLillo) [libra.txt]\n"
+                + "  creator: matched text (Don DeLillo)\n",
+            )
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_search_command_with_scoped_keyword(self, stdout):
-        self.app.main(["--no-color", "search", "type:book", "--detailed"])
-        self.assertEqual(
-            stdout.getvalue(),
-            "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
-            + "  type: matched text (book)\n"
-            + "Libra (Don DeLillo) [libra.txt]\n"
-            + "  type: matched text (book)\n",
-        )
+    def test_search_command_with_scoped_keyword(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["--no-color", "search", "type:book", "--detailed"])
+            self.assertEqual(
+                stdout.getvalue(),
+                "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
+                + "  type: matched text (book)\n"
+                + "Libra (Don DeLillo) [libra.txt]\n"
+                + "  type: matched text (book)\n",
+            )
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_search_command_on_year_field(self, stdout):
+    def test_search_command_on_year_field(self):
         # Regression test for issue #19
-        self.app.main(["--no-color", "search", "year:1988"])
-        self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["--no-color", "search", "year:1988"])
+            self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_search_command_with_multiple_terms(self, stdout):
+    def test_search_command_with_multiple_terms(self):
         # Regression test for issue #21
-        self.app.main(["--no-color", "search", "year:1988", "type:book"])
-        self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["--no-color", "search", "year:1988", "type:book"])
+            self.assertEqual(stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_search_command_with_location(self, stdout):
+    def test_search_command_with_location(self):
         # Regression test for issue #22
-        # Note that Crime and Punishment has St. Petersburg as its location, not Russia,
-        # so this tests the use of the location database to look up locations.
-        self.app.main(["--no-color", "search", "locations:russia"])
-        self.assertEqual(
-            stdout.getvalue(),
-            "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n",
-        )
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            # Note that Crime and Punishment has St. Petersburg as its location, not
+            # Russia, so this tests the use of the location database to look up
+            # locations.
+            self.app.main(["--no-color", "search", "locations:russia"])
+            self.assertEqual(
+                stdout.getvalue(),
+                "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n",
+            )
 
-    @patch("sys.stderr", new_callable=FakeStderr)
-    def test_search_command_with_unknown_field(self, stderr):
+    def test_search_command_with_unknown_field(self):
         # Regression test for issue #23
-        with self.assertRaises(SystemExit):
-            self.app.main(["--no-color", "search", "lol:whatever"])
+        with patch("sys.stderr", new_callable=FakeStderr) as stderr:
+            with self.assertRaises(SystemExit):
+                self.app.main(["--no-color", "search", "lol:whatever"])
 
-        self.assertEqual(stderr.getvalue(), "error: unknown field 'lol'\n")
+            self.assertEqual(stderr.getvalue(), "error: unknown field 'lol'\n")
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_search_command_with_partial_word_match(self, stdout):
+    def test_search_command_with_partial_word_match(self):
         # Regression test for issue #4
-        self.app.main(["--no-color", "search", "kw:modernist"])
-        self.assertEqual(stdout.getvalue(), "")
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            self.app.main(["--no-color", "search", "kw:modernist"])
+            self.assertEqual(stdout.getvalue(), "")
 
     # See the long comment below this test class for an explanation on how the new and
     # edit commands are tested.
 
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_new_command(self, stdout):
-        os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_new_command"
-        self.app.main(["--no-color", "new", "test_new_command_entry.txt"])
-        self.app.main(["--no-color", "show", "test_new_command_entry.txt"])
-        # In this test case and those below, the entry is printed twice: once by the new
-        # command (or the edit command, as the case may be) and once by the show
-        # command. We check both to make sure the entry has been successfully persisted
-        # to disk.
-        self.assertEqual(
-            stdout.getvalue(),
-            "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
-            + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
-        )
-
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_edit_command(self, stdout):
-        os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_edit_command"
-        self.app.main(["--no-color", "edit", "libra.txt"])
-        self.app.main(["--no-color", "show", "libra.txt"])
-        self.assertEqual(stdout.getvalue(), LIBRA_EDITED + LIBRA_EDITED)
-
-    @patch("sys.stdout", new_callable=FakeStdout)
-    def test_new_command_adding_new_keyword(self, stdout):
-        with patch("sys.stdin", new=StringIO("yes\n")):
-            os.environ["EDITOR"] = (
-                "python3 oeuvre_test.py --fake-editor "
-                + "test_new_command_adding_new_keyword"
-            )
-            self.app.main(
-                ["--no-color", "new", "test_new_command_adding_new_keyword.txt"]
-            )
-            self.app.main(
-                ["--no-color", "show", "test_new_command_adding_new_keyword.txt"]
-            )
+    def test_new_command(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            os.environ[
+                "EDITOR"
+            ] = "python3 oeuvre_test.py --fake-editor test_new_command"
+            self.app.main(["--no-color", "new", "test_new_command_entry.txt"])
+            self.app.main(["--no-color", "show", "test_new_command_entry.txt"])
+            # In this test case and those below, the entry is printed twice: once by the
+            # new command (or the edit command, as the case may be) and once by the show
+            # command. We check both to make sure the entry has been successfully
+            # persisted to disk.
             self.assertEqual(
                 stdout.getvalue(),
-                "new keywords for test_new_command_adding_new_keyword.txt: "
-                + "film-noir\nKeep? "
-                + "title: The Maltese Falcon\n"
-                + "type: film\n"
-                + "keywords:\n"
-                + "  film-noir\n"
-                + "title: The Maltese Falcon\n"
-                + "type: film\n"
-                + "keywords:\n"
-                + "  film-noir\n",
+                "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
+                + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
             )
+
+    def test_edit_command(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            os.environ["EDITOR"] = (
+                "python3 oeuvre_test.py --fake-editor " + "test_edit_command"
+            )
+            self.app.main(["--no-color", "edit", "libra.txt"])
+            self.app.main(["--no-color", "show", "libra.txt"])
+            self.assertEqual(stdout.getvalue(), LIBRA_EDITED + LIBRA_EDITED)
+
+    def test_new_command_adding_new_keyword(self):
+        with patch("sys.stdout", new_callable=FakeStdout) as stdout:
+            with patch("sys.stdin", new=StringIO("yes\n")):
+                os.environ["EDITOR"] = (
+                    "python3 oeuvre_test.py --fake-editor "
+                    + "test_new_command_adding_new_keyword"
+                )
+                self.app.main(
+                    ["--no-color", "new", "test_new_command_adding_new_keyword.txt"]
+                )
+                self.app.main(
+                    ["--no-color", "show", "test_new_command_adding_new_keyword.txt"]
+                )
+                self.assertEqual(
+                    stdout.getvalue(),
+                    "new keywords for test_new_command_adding_new_keyword.txt: "
+                    + "film-noir\nKeep? "
+                    + "title: The Maltese Falcon\n"
+                    + "type: film\n"
+                    + "keywords:\n"
+                    + "  film-noir\n"
+                    + "title: The Maltese Falcon\n"
+                    + "type: film\n"
+                    + "keywords:\n"
+                    + "  film-noir\n",
+                )
 
     # TODO(#24): Test editing multiple files.
     # TODO(#24): Test invalid edit (e.g., wrong value for 'type' field).
