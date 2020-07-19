@@ -20,7 +20,7 @@ import subprocess
 import sys
 import textwrap
 from collections import defaultdict
-from typing import Dict, IO, Iterable, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, IO, Iterable, List, Optional, Set, Tuple, Union
 
 
 OEUVRE_DIRECTORY = "/home/iafisher/files/oeuvre"
@@ -107,7 +107,15 @@ class Application:
     A class to represent the oeuvre application.
     """
 
-    def __init__(self, directory: str, *, stdout: IO, stderr: IO, stdin: IO) -> None:
+    def __init__(
+        self,
+        directory: str,
+        *,
+        stdout: IO,
+        stderr: IO,
+        stdin: IO,
+        editor: Callable[[List[str]], None],
+    ) -> None:
         """
         Args:
           directory: The path to the directory where the database entries are located.
@@ -122,6 +130,7 @@ class Application:
         self.stdout = stdout
         self.stderr = stderr
         self.stdin = stdin
+        self.editor = editor
         self.use_colors = True
 
     def main(self, args: List[str]) -> None:
@@ -285,10 +294,10 @@ class Application:
                 os.path.join(self.directory, e.filename)  # type: ignore
                 for e in entries
             ]
-            editor = os.environ.get("EDITOR", "nano").split()
-            r = subprocess.run(editor + paths)
-            if r.returncode != 0:
-                self.error(f"editor process exited with error code {r.returncode}")
+            try:
+                self.editor(paths)
+            except OeuvreError as e:
+                self.error(str(e))
 
             remaining_entries = []
             for old_entry in entries:
@@ -439,6 +448,13 @@ class Application:
 
     def color(self, text: str, color: str) -> str:
         return f"\033[{color}m{text}\033[0m" if self.use_colors else text
+
+
+def shell_editor(paths: List[str]) -> None:
+    editor = os.environ.get("EDITOR", "nano").split()
+    r = subprocess.run(editor + paths)
+    if r.returncode != 0:
+        raise OeuvreError(f"editor process exited with error code {r.returncode}")
 
 
 def match(
@@ -891,6 +907,10 @@ class OeuvreError(Exception):
 
 if __name__ == "__main__":
     app = Application(
-        OEUVRE_DIRECTORY, stdout=sys.stdout, stderr=sys.stderr, stdin=sys.stdin
+        OEUVRE_DIRECTORY,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        stdin=sys.stdin,
+        editor=shell_editor,
     )
     app.main(sys.argv[1:])
