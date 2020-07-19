@@ -42,43 +42,37 @@ class OeuvreTests(unittest.TestCase):
 
     def test_show_command(self):
         self.app.main(["show", "libra.txt"])
-        self.assertEqual(self.app.stdout.getvalue(), LIBRA_FULL)
+        self.assertOutput(LIBRA_FULL)
 
     def test_show_command_with_brief_flag(self):
         self.app.main(["show", "--brief", "libra.txt"])
-        self.assertEqual(self.app.stdout.getvalue(), LIBRA_BRIEF)
+        self.assertOutput(LIBRA_BRIEF)
 
     def test_search_command_with_bare_keyword(self):
         self.app.main(["--no-color", "search", "DeLillo", "--detailed"])
-        self.assertEqual(
-            self.app.stdout.getvalue(),
+        self.assertOutput(
             "Libra (Don DeLillo) [libra.txt]\n"
-            + "  creator: matched text (Don DeLillo)\n",
+            + "  creator: matched text (Don DeLillo)\n"
         )
 
     def test_search_command_with_scoped_keyword(self):
         self.app.main(["--no-color", "search", "type:book", "--detailed"])
-        self.assertEqual(
-            self.app.stdout.getvalue(),
+        self.assertOutput(
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
             + "  type: matched text (book)\n"
             + "Libra (Don DeLillo) [libra.txt]\n"
-            + "  type: matched text (book)\n",
+            + "  type: matched text (book)\n"
         )
 
     def test_search_command_on_year_field(self):
         # Regression test for issue #19
         self.app.main(["--no-color", "search", "year:1988"])
-        self.assertEqual(
-            self.app.stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n"
-        )
+        self.assertOutput("Libra (Don DeLillo) [libra.txt]\n")
 
     def test_search_command_with_multiple_terms(self):
         # Regression test for issue #21
         self.app.main(["--no-color", "search", "year:1988", "type:book"])
-        self.assertEqual(
-            self.app.stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n"
-        )
+        self.assertOutput("Libra (Don DeLillo) [libra.txt]\n")
 
     def test_search_command_with_location(self):
         # Regression test for issue #22
@@ -86,9 +80,8 @@ class OeuvreTests(unittest.TestCase):
         # Russia, so this tests the use of the location database to look up
         # locations.
         self.app.main(["--no-color", "search", "locations:russia"])
-        self.assertEqual(
-            self.app.stdout.getvalue(),
-            "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n",
+        self.assertOutput(
+            "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
         )
 
     def test_search_command_with_unknown_field(self):
@@ -96,12 +89,12 @@ class OeuvreTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.app.main(["--no-color", "search", "lol:whatever"])
 
-        self.assertEqual(self.app.stderr.getvalue(), "error: unknown field 'lol'\n")
+        self.assertOutput("error: unknown field 'lol'\n", stderr=True)
 
     def test_search_command_with_partial_word_match(self):
         # Regression test for issue #4
         self.app.main(["--no-color", "search", "kw:modernist"])
-        self.assertEqual(self.app.stdout.getvalue(), "")
+        self.assertOutput("")
 
     # See the long comment below this test class for an explanation on how the new and
     # edit commands are tested.
@@ -109,15 +102,15 @@ class OeuvreTests(unittest.TestCase):
     def test_new_command(self):
         os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_new_command"
         self.app.main(["--no-color", "new", "test_new_command_entry.txt"])
-        self.app.main(["--no-color", "show", "test_new_command_entry.txt"])
-        # In this test case and those below, the entry is printed twice: once by the
-        # new command (or the edit command, as the case may be) and once by the show
-        # command. We check both to make sure the entry has been successfully
-        # persisted to disk.
-        self.assertEqual(
-            self.app.stdout.getvalue(),
+        self.assertOutput(
             "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
-            + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
+        )
+
+        # Check that the entry has been successfully persisted to disk.
+        self.reset_io()
+        self.app.main(["--no-color", "show", "test_new_command_entry.txt"])
+        self.assertOutput(
+            "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
         )
 
     def test_new_command_without_txt_extension(self):
@@ -125,15 +118,13 @@ class OeuvreTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.app.main(["--no-color", "new", "no-extension"])
 
-        self.assertEqual(
-            self.app.stderr.getvalue(), "error: entry name must end in .txt\n"
-        )
+        self.assertOutput("error: entry name must end in .txt\n", stderr=True)
 
     def test_edit_command(self):
         os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_edit_command"
         self.app.main(["--no-color", "edit", "libra.txt"])
         self.app.main(["--no-color", "show", "libra.txt"])
-        self.assertEqual(self.app.stdout.getvalue(), LIBRA_EDITED + LIBRA_EDITED)
+        self.assertOutput(LIBRA_EDITED + LIBRA_EDITED)
 
     def test_new_command_adding_new_keyword(self):
         self.app.stdin = StringIO("yes\n")
@@ -143,8 +134,7 @@ class OeuvreTests(unittest.TestCase):
         )
         self.app.main(["--no-color", "new", "test_new_command_adding_new_keyword.txt"])
         self.app.main(["--no-color", "show", "test_new_command_adding_new_keyword.txt"])
-        self.assertEqual(
-            self.app.stdout.getvalue(),
+        self.assertOutput(
             "new keywords for test_new_command_adding_new_keyword.txt: "
             + "film-noir\nKeep? "
             + "title: The Maltese Falcon\n"
@@ -154,7 +144,7 @@ class OeuvreTests(unittest.TestCase):
             + "title: The Maltese Falcon\n"
             + "type: film\n"
             + "keywords:\n"
-            + "  film-noir\n",
+            + "  film-noir\n"
         )
 
     # TODO(#24): Test invalid edit (e.g., wrong value for 'type' field).
@@ -162,8 +152,7 @@ class OeuvreTests(unittest.TestCase):
     def test_edit_command_with_multiple_files(self):
         # Make sure the entries don't already have the keyword we are going to add.
         self.app.main(["--no-color", "search", "keywords:edited"])
-        self.assertEqual(self.app.stdout.getvalue(), "")
-        self.assertEqual(self.app.stderr.getvalue(), "")
+        self.assertOutput("")
 
         # Accept confirmation for adding new keywords.
         self.app.stdin = StringIO("yes\nyes\n")
@@ -172,20 +161,17 @@ class OeuvreTests(unittest.TestCase):
             + "test_edit_command_with_multiple_files"
         )
         self.app.main(["--no-color", "edit", "type:book"])
-        self.assertEqual(
-            self.app.stdout.getvalue(),
+        self.assertOutput(
             "new keywords for crime-and-punishment.txt: edited\nKeep? "
-            + "new keywords for libra.txt: edited\nKeep? ",
+            + "new keywords for libra.txt: edited\nKeep? "
         )
 
         self.reset_io()
         self.app.main(["--no-color", "search", "keywords:edited"])
-        self.assertEqual(
-            self.app.stdout.getvalue(),
+        self.assertOutput(
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
-            + "Libra (Don DeLillo) [libra.txt]\n",
+            + "Libra (Don DeLillo) [libra.txt]\n"
         )
-        self.assertEqual(self.app.stderr.getvalue(), "")
 
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
@@ -209,6 +195,17 @@ class OeuvreTests(unittest.TestCase):
             [KeywordField("apples", None), KeywordField("oranges", "description")],
         )
         self.assertEqual(lines, [(4, "foo: bar"), (3, "")])
+
+    def assertOutput(self, expected, *, stderr=False):
+        if stderr:
+            stream = self.app.stderr
+            other_stream = self.app.stdout
+        else:
+            stream = self.app.stdout
+            other_stream = self.app.stderr
+
+        self.assertEqual(stream.getvalue(), expected)
+        self.assertEqual(other_stream.getvalue(), "")
 
     def reset_io(self):
         self.app.stdin = None
