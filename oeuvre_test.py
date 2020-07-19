@@ -37,22 +37,21 @@ class OeuvreTests(unittest.TestCase):
         # the editor before each test case.
         os.environ["EDITOR"] = "/dev/null"
 
-        self.stdout = FakeStdout()
-        self.stderr = FakeStderr()
-        self.app = Application(d, stdout=self.stdout, stderr=self.stderr, stdin=None)
+        self.app = Application(d, stdout=None, stderr=None, stdin=None)
+        self.reset_io()
 
     def test_show_command(self):
         self.app.main(["show", "libra.txt"])
-        self.assertEqual(self.stdout.getvalue(), LIBRA_FULL)
+        self.assertEqual(self.app.stdout.getvalue(), LIBRA_FULL)
 
     def test_show_command_with_brief_flag(self):
         self.app.main(["show", "--brief", "libra.txt"])
-        self.assertEqual(self.stdout.getvalue(), LIBRA_BRIEF)
+        self.assertEqual(self.app.stdout.getvalue(), LIBRA_BRIEF)
 
     def test_search_command_with_bare_keyword(self):
         self.app.main(["--no-color", "search", "DeLillo", "--detailed"])
         self.assertEqual(
-            self.stdout.getvalue(),
+            self.app.stdout.getvalue(),
             "Libra (Don DeLillo) [libra.txt]\n"
             + "  creator: matched text (Don DeLillo)\n",
         )
@@ -60,7 +59,7 @@ class OeuvreTests(unittest.TestCase):
     def test_search_command_with_scoped_keyword(self):
         self.app.main(["--no-color", "search", "type:book", "--detailed"])
         self.assertEqual(
-            self.stdout.getvalue(),
+            self.app.stdout.getvalue(),
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
             + "  type: matched text (book)\n"
             + "Libra (Don DeLillo) [libra.txt]\n"
@@ -70,12 +69,16 @@ class OeuvreTests(unittest.TestCase):
     def test_search_command_on_year_field(self):
         # Regression test for issue #19
         self.app.main(["--no-color", "search", "year:1988"])
-        self.assertEqual(self.stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+        self.assertEqual(
+            self.app.stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n"
+        )
 
     def test_search_command_with_multiple_terms(self):
         # Regression test for issue #21
         self.app.main(["--no-color", "search", "year:1988", "type:book"])
-        self.assertEqual(self.stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n")
+        self.assertEqual(
+            self.app.stdout.getvalue(), "Libra (Don DeLillo) [libra.txt]\n"
+        )
 
     def test_search_command_with_location(self):
         # Regression test for issue #22
@@ -84,7 +87,7 @@ class OeuvreTests(unittest.TestCase):
         # locations.
         self.app.main(["--no-color", "search", "locations:russia"])
         self.assertEqual(
-            self.stdout.getvalue(),
+            self.app.stdout.getvalue(),
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n",
         )
 
@@ -93,12 +96,12 @@ class OeuvreTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.app.main(["--no-color", "search", "lol:whatever"])
 
-        self.assertEqual(self.stderr.getvalue(), "error: unknown field 'lol'\n")
+        self.assertEqual(self.app.stderr.getvalue(), "error: unknown field 'lol'\n")
 
     def test_search_command_with_partial_word_match(self):
         # Regression test for issue #4
         self.app.main(["--no-color", "search", "kw:modernist"])
-        self.assertEqual(self.stdout.getvalue(), "")
+        self.assertEqual(self.app.stdout.getvalue(), "")
 
     # See the long comment below this test class for an explanation on how the new and
     # edit commands are tested.
@@ -112,7 +115,7 @@ class OeuvreTests(unittest.TestCase):
         # command. We check both to make sure the entry has been successfully
         # persisted to disk.
         self.assertEqual(
-            self.stdout.getvalue(),
+            self.app.stdout.getvalue(),
             "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
             + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
         )
@@ -122,13 +125,15 @@ class OeuvreTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.app.main(["--no-color", "new", "no-extension"])
 
-        self.assertEqual(self.stderr.getvalue(), "error: entry name must end in .txt\n")
+        self.assertEqual(
+            self.app.stderr.getvalue(), "error: entry name must end in .txt\n"
+        )
 
     def test_edit_command(self):
         os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_edit_command"
         self.app.main(["--no-color", "edit", "libra.txt"])
         self.app.main(["--no-color", "show", "libra.txt"])
-        self.assertEqual(self.stdout.getvalue(), LIBRA_EDITED + LIBRA_EDITED)
+        self.assertEqual(self.app.stdout.getvalue(), LIBRA_EDITED + LIBRA_EDITED)
 
     def test_new_command_adding_new_keyword(self):
         self.app.stdin = StringIO("yes\n")
@@ -139,7 +144,7 @@ class OeuvreTests(unittest.TestCase):
         self.app.main(["--no-color", "new", "test_new_command_adding_new_keyword.txt"])
         self.app.main(["--no-color", "show", "test_new_command_adding_new_keyword.txt"])
         self.assertEqual(
-            self.stdout.getvalue(),
+            self.app.stdout.getvalue(),
             "new keywords for test_new_command_adding_new_keyword.txt: "
             + "film-noir\nKeep? "
             + "title: The Maltese Falcon\n"
@@ -152,8 +157,35 @@ class OeuvreTests(unittest.TestCase):
             + "  film-noir\n",
         )
 
-    # TODO(#24): Test editing multiple files.
     # TODO(#24): Test invalid edit (e.g., wrong value for 'type' field).
+
+    def test_edit_command_with_multiple_files(self):
+        # Make sure the entries don't already have the keyword we are going to add.
+        self.app.main(["--no-color", "search", "keywords:edited"])
+        self.assertEqual(self.app.stdout.getvalue(), "")
+        self.assertEqual(self.app.stderr.getvalue(), "")
+
+        # Accept confirmation for adding new keywords.
+        self.app.stdin = StringIO("yes\nyes\n")
+        os.environ["EDITOR"] = (
+            "python3 oeuvre_test.py --fake-editor "
+            + "test_edit_command_with_multiple_files"
+        )
+        self.app.main(["--no-color", "edit", "type:book"])
+        self.assertEqual(
+            self.app.stdout.getvalue(),
+            "new keywords for crime-and-punishment.txt: edited\nKeep? "
+            + "new keywords for libra.txt: edited\nKeep? ",
+        )
+
+        self.reset_io()
+        self.app.main(["--no-color", "search", "keywords:edited"])
+        self.assertEqual(
+            self.app.stdout.getvalue(),
+            "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
+            + "Libra (Don DeLillo) [libra.txt]\n",
+        )
+        self.assertEqual(self.app.stderr.getvalue(), "")
 
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
@@ -177,6 +209,11 @@ class OeuvreTests(unittest.TestCase):
             [KeywordField("apples", None), KeywordField("oranges", "description")],
         )
         self.assertEqual(lines, [(4, "foo: bar"), (3, "")])
+
+    def reset_io(self):
+        self.app.stdin = None
+        self.app.stdout = FakeStdout()
+        self.app.stderr = FakeStderr()
 
     def tearDown(self):
         self._directory.cleanup()
@@ -215,6 +252,11 @@ def fake_editor(test_case, paths):
         contents = set_field(contents, "type", "film")
         contents = add_to_list_field(contents, "keywords", "film-noir")
         write_file(path, contents)
+    elif test_case == "test_edit_command_with_multiple_files":
+        for path in paths:
+            contents = read_file(path)
+            contents = add_to_list_field(contents, "keywords", "edited")
+            write_file(path, contents)
     else:
         raise Exception(f"unknown test case for fake editor: {test_case}")
 
