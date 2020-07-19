@@ -35,7 +35,7 @@ class OeuvreTests(unittest.TestCase):
 
         # Guard against different test cases interfering with one another by resetting
         # the editor before each test case.
-        os.environ["EDITOR"] = "does not exist"
+        os.environ["EDITOR"] = "/dev/null"
 
         self.stdout = FakeStdout()
         self.stderr = FakeStderr()
@@ -116,6 +116,13 @@ class OeuvreTests(unittest.TestCase):
             "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n"
             + "title: Blood Meridian\ncreator: Cormac McCarthy\ntype: book\n",
         )
+
+    def test_new_command_without_txt_extension(self):
+        # Regression test for issue #25
+        with self.assertRaises(SystemExit):
+            self.app.main(["--no-color", "new", "no-extension"])
+
+        self.assertEqual(self.stderr.getvalue(), "error: entry name must end in .txt\n")
 
     def test_edit_command(self):
         os.environ["EDITOR"] = "python3 oeuvre_test.py --fake-editor test_edit_command"

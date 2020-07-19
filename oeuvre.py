@@ -205,6 +205,9 @@ class Application:
         """
         Creates a new entry.
         """
+        if not args.path.endswith(".txt"):
+            self.error("entry name must end in .txt")
+
         fullpath = os.path.join(self.directory, args.path)
         if os.path.exists(fullpath):
             self.error(f"{fullpath} already exists.")
