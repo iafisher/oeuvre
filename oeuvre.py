@@ -843,7 +843,7 @@ def validate_field(field: str, value: str, *, lineno: int) -> Union[str, int]:
 
     if field == "type" and value not in TYPE_CHOICES:
         raise OeuvreError(
-            f"'type' must be one of: {', '.join(TYPE_CHOICES)}", lineno=lineno
+            f"'type' must be one of: {', '.join(sorted(TYPE_CHOICES))}", lineno=lineno
         )
 
     if field == "year" and value:

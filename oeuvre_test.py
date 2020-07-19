@@ -147,8 +147,6 @@ class OeuvreTests(unittest.TestCase):
             + "  film-noir\n"
         )
 
-    # TODO(#24): Test invalid edit (e.g., wrong value for 'type' field).
-
     def test_edit_command_with_multiple_files(self):
         # Make sure the entries don't already have the keyword we are going to add.
         self.app.main(["--no-color", "search", "keywords:edited"])
@@ -172,6 +170,26 @@ class OeuvreTests(unittest.TestCase):
             "Crime and Punishment (Fyodor Dostoyevsky) [crime-and-punishment.txt]\n"
             + "Libra (Don DeLillo) [libra.txt]\n"
         )
+
+    def test_edit_command_with_invalid_edit(self):
+        self.app.stdin = StringIO("no\n")
+        os.environ["EDITOR"] = (
+            "python3 oeuvre_test.py --fake-editor "
+            + "test_edit_command_with_invalid_edit"
+        )
+        self.app.main(["--no-color", "edit", "libra.txt"])
+        self.assertEqual(
+            self.app.stderr.getvalue(),
+            "error: 'type' must be one of: book, film, play, story, television"
+            + " (libra.txt, line 3)\n",
+        )
+        self.assertEqual(self.app.stdout.getvalue(), "Try again? ")
+
+        # Make sure the edit was not saved.
+        self.reset_io()
+        self.app.main(["--no-color", "show", "libra.txt"])
+        self.assertIn("type: book", self.app.stdout.getvalue())
+        self.assertNotIn("type: whatever", self.app.stdout.getvalue())
 
     def test_parse_longform_field(self):
         text = "  Paragraph one\n\n  Paragraph two\n\nfoo: bar"
@@ -254,6 +272,11 @@ def fake_editor(test_case, paths):
             contents = read_file(path)
             contents = add_to_list_field(contents, "keywords", "edited")
             write_file(path, contents)
+    elif test_case == "test_edit_command_with_invalid_edit":
+        path = paths[0]
+        contents = read_file(path)
+        contents = set_field(contents, "type", "whatever", overwrite=True)
+        write_file(path, contents)
     else:
         raise Exception(f"unknown test case for fake editor: {test_case}")
 
