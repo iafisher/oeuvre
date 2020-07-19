@@ -8,6 +8,8 @@ plot-summary:
 
   In the event, Oswald and the Cubans both hit President Kennedy. Oswald is arrested and is himself murdered several days later by Jack Ruby, who was manipulated into doing it by members of the conspiracy. The chapters of the book alternate between Oswald's and various conspirator's perspectives.
 
+characters:
+
 locations:
   dallas
   new-orleans
@@ -20,3 +22,9 @@ keywords:
   military
   non-linear
   postmodernist
+
+settings:
+
+notes:
+
+quotes:

@@ -1,6 +1,19 @@
 title: Crime and Punishment
 creator: Fyodor Dostoyevsky
 type: book
+year:
 language: Russian
+plot-summary:
+
+characters:
+
 locations:
   st-petersburg
+
+keywords:
+
+settings:
+
+notes:
+
+quotes:
