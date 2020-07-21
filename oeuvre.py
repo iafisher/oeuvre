@@ -325,7 +325,7 @@ class Application:
                     if new_keywords:
                         self.print(
                             f"new keywords for {old_entry.filename}: "
-                            + f"{', '.join(new_keywords)}"
+                            + f"{', '.join(sorted(new_keywords))}"
                         )
 
                         if not self.confirm("Keep? "):
