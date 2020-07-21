@@ -876,11 +876,9 @@ def alphabetical_key(match_pair: Tuple[Entry, List[str]]) -> str:
     Key for sort functions to sort entries alphabetically.
     """
     entry = match_pair[0]
-    name = str(entry)
+    name = entry.title
     if name.startswith("The "):
         return name[4:]
-    elif name.startswith(("Le ", "La ")):
-        return name[3:]
     else:
         return name
 
